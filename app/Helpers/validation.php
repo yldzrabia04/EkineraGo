@@ -1,6 +1,6 @@
 ﻿<?php
 
-declare(strict_types=1);
+
 
 if (!function_exists('validate_required')) {
     function validate_required(array $data, array $fields): array

@@ -1,6 +1,6 @@
 ﻿<?php
 
-declare(strict_types=1);
+
 
 if (!function_exists('csrf_token')) {
     function csrf_token(): string

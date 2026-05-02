@@ -1,6 +1,6 @@
 ﻿<?php
 
-declare(strict_types=1);
+
 
 if (!function_exists('currentUser')) {
     function currentUser(): ?array
@@ -69,11 +69,7 @@ if (!function_exists('requireGuest')) {
                 redirect('producer/dashboard.php');
             }
 
-            if (($user['role'] ?? '') === ROLE_ADMIN) {
-                redirect('admin/dashboard.php');
-            }
-
-            redirect('consumer/dashboard.php');
+            redirect('index.php');
         }
     }
 }

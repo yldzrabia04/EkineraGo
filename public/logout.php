@@ -1,6 +1,8 @@
 ﻿<?php
-require_once __DIR__ . '/../config/config.php';
-require_once __DIR__ . '/../config/database.php';
 
-// TODO: public page: logout.php
-echo '<h1>EkineraGo - logout.php</h1>';
+
+
+require_once __DIR__ . '/../app/bootstrap.php';
+
+$controller = new AuthController();
+$controller->logout();

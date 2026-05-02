@@ -1,17 +1,11 @@
 ﻿<?php
 
-declare(strict_types=1);
-
 require_once __DIR__ . '/config.php';
 
 /*
 |--------------------------------------------------------------------------
 | Database Config
 |--------------------------------------------------------------------------
-| XAMPP varsayılanı:
-| host: localhost
-| user: root
-| pass: boş
 */
 
 defined('DB_HOST') || define('DB_HOST', getenv('DB_HOST') ?: 'localhost');
@@ -47,7 +41,7 @@ function db(): PDO
         $pdo = new PDO($dsn, DB_USER, DB_PASS, $options);
         return $pdo;
     } catch (PDOException $e) {
-        if (APP_DEBUG) {
+        if (defined('APP_DEBUG') && APP_DEBUG) {
             throw new RuntimeException(
                 'Veritabanı bağlantısı kurulamadı: ' . $e->getMessage(),
                 0,
@@ -59,7 +53,7 @@ function db(): PDO
     }
 }
 
-function db_transaction(callable $callback): mixed
+function db_transaction(callable $callback)
 {
     $pdo = db();
 

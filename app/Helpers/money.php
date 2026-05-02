@@ -1,6 +1,6 @@
 ﻿<?php
 
-declare(strict_types=1);
+
 
 if (!function_exists('formatMoney')) {
     function formatMoney(float|int|string $amount): string

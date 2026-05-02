@@ -1,6 +1,6 @@
 ﻿<?php
 
-declare(strict_types=1);
+
 
 if (!function_exists('ensure_upload_directory')) {
     function ensure_upload_directory(string $directory): void
