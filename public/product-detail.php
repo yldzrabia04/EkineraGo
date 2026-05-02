@@ -71,6 +71,23 @@ if (!function_exists('detail_status_badge')) {
         };
     }
 }
+
+if (!function_exists('detail_old_value')) {
+    function detail_old_value(string $key, string $default = ''): string
+    {
+        if (!function_exists('old')) {
+            return $default;
+        }
+
+        $value = old($key);
+
+        if ($value === null || $value === '') {
+            return $default;
+        }
+
+        return (string) $value;
+    }
+}
 ?>
 
 <main class="container">
@@ -88,13 +105,52 @@ if (!function_exists('detail_status_badge')) {
         </section>
     <?php else: ?>
         <?php
+            $productId = (int) ($product['id'] ?? $productId);
+            $producerId = (int) ($product['producer_id'] ?? 0);
+
             $unit = detail_unit_label($product['unit_type'] ?? 'kg');
             $status = $product['status'] ?? 'active';
             $producerName = $product['store_name'] ?: ($product['producer_name'] ?? 'Üretici');
             $images = $product['images'] ?? [];
             $coverImage = $product['cover_image']['image_path'] ?? null;
-            $reviews = $product['reviews'] ?? [];
             $stockQuantity = (float) ($product['stock_quantity'] ?? 0);
+
+            $roleConsumer = defined('ROLE_CONSUMER') ? ROLE_CONSUMER : 'consumer';
+            $productActiveStatus = defined('PRODUCT_STATUS_ACTIVE') ? PRODUCT_STATUS_ACTIVE : 'active';
+
+            $isConsumerUser = $user && (($user['role'] ?? '') === $roleConsumer);
+            $consumerId = $isConsumerUser ? (int) currentUserId() : 0;
+
+            $isFavorited = !empty($data['isFavorited'])
+                || !empty($data['is_favorited'])
+                || !empty($product['is_favorited']);
+
+            $reviews = $product['reviews'] ?? ($data['reviews'] ?? []);
+
+            $reviewableOrderItems = [];
+
+            if (class_exists('ReviewService')) {
+                $reviewService = new ReviewService();
+
+                $reviews = $reviewService->getVisibleByProductId($productId, 30);
+
+                if ($isConsumerUser) {
+                    $reviewableOrderItems = $reviewService->getReviewableOrderItemsForProduct($consumerId, $productId);
+                }
+            }
+
+            $questions = [];
+
+            if (class_exists('ProductQuestionService')) {
+                $questionService = new ProductQuestionService();
+
+                if (method_exists($questionService, 'getPublicQuestionsByProductId')) {
+                    $questions = $questionService->getPublicQuestionsByProductId($productId);
+                }
+            }
+
+            $reviewStoreUrl = url('consumer/orders.php?review_order_item_id=0');
+            $questionStoreUrl = url('api/product-question-store.php');
         ?>
 
         <section class="detail-layout">
@@ -208,12 +264,12 @@ if (!function_exists('detail_status_badge')) {
                         <a class="btn" href="<?= e(url('login.php')) ?>">
                             Sepete Eklemek İçin Giriş Yap
                         </a>
-                    <?php elseif (($user['role'] ?? '') === ROLE_CONSUMER): ?>
-                        <?php if ($status === PRODUCT_STATUS_ACTIVE && $stockQuantity > 0): ?>
-                            <form method="POST" action="<?= e(url('product-detail.php?id=' . $product['id'])) ?>" class="add-cart-form">
+                    <?php elseif ($isConsumerUser): ?>
+                        <?php if ($status === $productActiveStatus && $stockQuantity > 0): ?>
+                            <form method="POST" action="<?= e(url('product-detail.php?id=' . $productId)) ?>" class="add-cart-form">
                                 <?= csrf_field() ?>
 
-                                <input type="hidden" name="product_id" value="<?= e((string) $product['id']) ?>">
+                                <input type="hidden" name="product_id" value="<?= e((string) $productId) ?>">
 
                                 <label for="quantity">
                                     Miktar
@@ -248,16 +304,23 @@ if (!function_exists('detail_status_badge')) {
                             </button>
                         <?php endif; ?>
 
-                        <button class="btn btn-secondary" type="button" disabled>
-                            Favoriye Ekle
-                        </button>
+                        <form method="POST" action="<?= e(url('api/favorite-toggle.php')) ?>">
+                            <?= csrf_field() ?>
+
+                            <input type="hidden" name="product_id" value="<?= e((string) $productId) ?>">
+                            <input type="hidden" name="return_to" value="product-detail.php?id=<?= e((string) $productId) ?>">
+
+                            <button class="btn btn-secondary" type="submit">
+                                <?= $isFavorited ? 'Favoriden Çıkar' : 'Favoriye Ekle' ?>
+                            </button>
+                        </form>
                     <?php else: ?>
                         <button class="btn" type="button" disabled>
                             Sadece Tüketiciler Satın Alabilir
                         </button>
                     <?php endif; ?>
 
-                    <a class="btn btn-secondary" href="<?= e(url('producer-detail.php?id=' . $product['producer_id'])) ?>">
+                    <a class="btn btn-secondary" href="<?= e(url('producer-detail.php?id=' . $producerId)) ?>">
                         Üretici Profili
                     </a>
 
@@ -268,15 +331,111 @@ if (!function_exists('detail_status_badge')) {
             </aside>
         </section>
 
-        <section class="card reviews-box">
-            <h2>Yorumlar</h2>
+        <section class="card reviews-box" id="reviews">
+            <div class="section-title-row">
+                <div>
+                    <h2>Yorumlar</h2>
+                    <p>Bu ürünü teslim alan tüketicilerin değerlendirmeleri.</p>
+                </div>
+            </div>
+
+            <?php if ($isConsumerUser): ?>
+                <?php if (!empty($reviewableOrderItems)): ?>
+                    <div class="inline-form-box">
+                        <h3>Bu Ürüne Yorum Yaz</h3>
+
+                        <div id="product-review-message" class="ajax-message" hidden></div>
+
+                        <form
+                            method="POST"
+                            action="<?= e($reviewStoreUrl) ?>"
+                            id="product-review-form"
+                            class="ajax-form"
+                        >
+                            <?= csrf_field() ?>
+
+                            <input type="hidden" name="product_id" value="<?= e((string) $productId) ?>">
+
+                            <?php if (count($reviewableOrderItems) === 1): ?>
+                                <input
+                                    type="hidden"
+                                    name="order_item_id"
+                                    value="<?= e((string) $reviewableOrderItems[0]['order_item_id']) ?>"
+                                >
+
+                                <p class="helper-text">
+                                    Sipariş No:
+                                    <strong><?= e($reviewableOrderItems[0]['order_no'] ?? '-') ?></strong>
+                                </p>
+                            <?php else: ?>
+                                <div class="form-group">
+                                    <label for="review_order_item_id">Yorum yapılacak sipariş</label>
+
+                                    <select id="review_order_item_id" name="order_item_id" required>
+                                        <option value="">Sipariş seç</option>
+
+                                        <?php foreach ($reviewableOrderItems as $reviewableItem): ?>
+                                            <option value="<?= e((string) $reviewableItem['order_item_id']) ?>">
+                                                <?= e($reviewableItem['order_no'] ?? 'Sipariş') ?>
+                                                -
+                                                <?= !empty($reviewableItem['order_created_at'])
+                                                    ? e(date('d.m.Y', strtotime($reviewableItem['order_created_at'])))
+                                                    : ''
+                                                ?>
+                                            </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                            <?php endif; ?>
+
+                            <div class="form-group">
+                                <label for="product-review-rating">Puan</label>
+
+                                <select id="product-review-rating" name="rating" required>
+                                    <option value="">Puan seç</option>
+                                    <option value="5">5 - Çok iyi</option>
+                                    <option value="4">4 - İyi</option>
+                                    <option value="3">3 - Orta</option>
+                                    <option value="2">2 - Kötü</option>
+                                    <option value="1">1 - Çok kötü</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="product-review-comment">Yorum</label>
+
+                                <textarea
+                                    id="product-review-comment"
+                                    name="comment"
+                                    rows="4"
+                                    maxlength="1000"
+                                    placeholder="Ürünün tazeliği, paketleme ve teslimat deneyimini yaz..."
+                                ></textarea>
+                            </div>
+
+                            <button class="btn" type="submit" id="product-review-submit">
+                                Yorumu Gönder
+                            </button>
+                        </form>
+                    </div>
+                <?php else: ?>
+                    <div class="inline-info-box">
+                        Bu ürüne yorum yazabilmek için ürünü satın almış ve siparişinin teslim edilmiş olması gerekir.
+                    </div>
+                <?php endif; ?>
+            <?php elseif (!$user): ?>
+                <div class="inline-info-box">
+                    Yorum yazmak için
+                    <a href="<?= e(url('login.php')) ?>">giriş yapmalısın</a>.
+                </div>
+            <?php endif; ?>
 
             <?php if (empty($reviews)): ?>
-                <p>
+                <p id="empty-reviews-text">
                     Bu ürün için henüz görünür yorum yok.
                 </p>
             <?php else: ?>
-                <div class="review-list">
+                <div class="review-list" id="review-list">
                     <?php foreach ($reviews as $review): ?>
                         <article class="review-item">
                             <strong>
@@ -293,6 +452,107 @@ if (!function_exists('detail_status_badge')) {
                                     : ''
                                 ?>
                             </span>
+                        </article>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </section>
+
+        <section class="card questions-box" id="questions">
+            <div class="section-title-row">
+                <div>
+                    <h2>Satıcıya Sorular</h2>
+                    <p>Ürünle ilgili merak ettiklerini üreticiye sorabilirsin.</p>
+                </div>
+            </div>
+
+            <?php if ($isConsumerUser): ?>
+                <div class="inline-form-box">
+                    <h3>Satıcıya Soru Sor</h3>
+
+                    <div id="product-question-message" class="ajax-message" hidden></div>
+
+                    <form
+                        method="POST"
+                        action="<?= e($questionStoreUrl) ?>"
+                        id="product-question-form"
+                        class="ajax-form"
+                    >
+                        <?= csrf_field() ?>
+
+                        <input type="hidden" name="product_id" value="<?= e((string) $productId) ?>">
+                        <input type="hidden" name="producer_id" value="<?= e((string) $producerId) ?>">
+
+                        <div class="form-group">
+                            <label for="product-question-text">Sorun</label>
+
+                            <textarea
+                                id="product-question-text"
+                                name="question"
+                                rows="4"
+                                maxlength="1000"
+                                placeholder="Örneğin: Ürün ne zaman hasat edildi? Kargo hangi gün çıkar?"
+                                required
+                            ></textarea>
+                        </div>
+
+                        <button class="btn" type="submit" id="product-question-submit">
+                            Soruyu Gönder
+                        </button>
+                    </form>
+                </div>
+            <?php elseif (!$user): ?>
+                <div class="inline-info-box">
+                    Satıcıya soru sormak için
+                    <a href="<?= e(url('login.php')) ?>">giriş yapmalısın</a>.
+                </div>
+            <?php elseif ($producerId === (int) currentUserId()): ?>
+                <div class="inline-info-box">
+                    Bu ürün sana ait. Gelen soruları üretici panelinden cevaplayacaksın.
+                </div>
+            <?php endif; ?>
+
+            <?php if (empty($questions)): ?>
+                <p id="empty-questions-text">
+                    Bu ürün için henüz soru sorulmamış.
+                </p>
+            <?php else: ?>
+                <div class="question-list" id="question-list">
+                    <?php foreach ($questions as $question): ?>
+                        <article class="question-item">
+                            <div class="question-content">
+                                <strong>
+                                    <?= e($question['consumer_name'] ?? 'Tüketici') ?> sordu:
+                                </strong>
+
+                                <p><?= nl2br(e($question['question'] ?? '')) ?></p>
+
+                                <span>
+                                    <?= !empty($question['created_at'])
+                                        ? e(date('d.m.Y H:i', strtotime($question['created_at'])))
+                                        : ''
+                                    ?>
+                                </span>
+                            </div>
+
+                            <?php if (!empty($question['answer'])): ?>
+                                <div class="answer-content">
+                                    <strong><?= e($producerName) ?> cevapladı:</strong>
+
+                                    <p><?= nl2br(e($question['answer'])) ?></p>
+
+                                    <span>
+                                        <?= !empty($question['answered_at'])
+                                            ? e(date('d.m.Y H:i', strtotime($question['answered_at'])))
+                                            : ''
+                                        ?>
+                                    </span>
+                                </div>
+                            <?php else: ?>
+                                <div class="answer-pending">
+                                    Üretici cevabı bekleniyor.
+                                </div>
+                            <?php endif; ?>
                         </article>
                     <?php endforeach; ?>
                 </div>
@@ -349,8 +609,11 @@ if (!function_exists('detail_status_badge')) {
     .producer-name,
     .description,
     .reviews-box p,
+    .questions-box p,
     .preorder-box p,
-    .empty-state p {
+    .empty-state p,
+    .section-title-row p,
+    .helper-text {
         color: #526052;
         line-height: 1.6;
     }
@@ -438,7 +701,8 @@ if (!function_exists('detail_status_badge')) {
         margin-bottom: 8px;
     }
 
-    .add-cart-form label {
+    .add-cart-form label,
+    .ajax-form label {
         color: #245c2f;
         font-weight: bold;
     }
@@ -466,34 +730,119 @@ if (!function_exists('detail_status_badge')) {
         cursor: not-allowed;
     }
 
-    .reviews-box {
+    .reviews-box,
+    .questions-box {
         margin-top: 22px;
     }
 
     .reviews-box h2,
+    .questions-box h2,
     .empty-state h1 {
         margin-top: 0;
         color: #245c2f;
     }
 
-    .review-list {
+    .section-title-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: flex-start;
+        border-bottom: 1px solid #edf1ea;
+        margin-bottom: 18px;
+        padding-bottom: 14px;
+    }
+
+    .section-title-row h2,
+    .section-title-row p {
+        margin-bottom: 0;
+    }
+
+    .inline-form-box,
+    .inline-info-box {
+        padding: 16px;
+        border-radius: 14px;
+        background: #f8fbf6;
+        margin-bottom: 18px;
+    }
+
+    .inline-form-box h3 {
+        margin-top: 0;
+        color: #245c2f;
+    }
+
+    .ajax-form {
         display: grid;
         gap: 14px;
     }
 
-    .review-item {
+    .form-group {
+        display: grid;
+        gap: 7px;
+    }
+
+    .ajax-form select,
+    .ajax-form textarea {
+        width: 100%;
+        padding: 11px;
+        border: 1px solid #d5dccf;
+        border-radius: 9px;
+        font-family: Arial, sans-serif;
+    }
+
+    .ajax-message {
+        margin-bottom: 14px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        font-weight: 600;
+    }
+
+    .ajax-message.success {
+        background: #e7f7e8;
+        color: #236b2c;
+    }
+
+    .ajax-message.error {
+        background: #fdeaea;
+        color: #9b111e;
+    }
+
+    .review-list,
+    .question-list {
+        display: grid;
+        gap: 14px;
+    }
+
+    .review-item,
+    .question-item {
         padding: 16px;
         border-radius: 12px;
         background: #f8fbf6;
     }
 
-    .review-item strong {
+    .review-item strong,
+    .question-item strong {
         color: #245c2f;
     }
 
-    .review-item span {
+    .review-item span,
+    .question-item span {
         color: #718071;
         font-size: 14px;
+    }
+
+    .answer-content {
+        margin-top: 14px;
+        padding: 14px;
+        border-radius: 12px;
+        background: #eef8ef;
+        border-left: 4px solid #2f7d3d;
+    }
+
+    .answer-pending {
+        margin-top: 14px;
+        color: #718071;
+        font-size: 14px;
+        font-weight: bold;
     }
 
     .empty-state {
@@ -515,5 +864,214 @@ if (!function_exists('detail_status_badge')) {
         }
     }
 </style>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const currentUserName = <?= json_encode($user['full_name'] ?? 'Tüketici', JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+
+        function showMessage(element, type, message) {
+            if (!element) {
+                return;
+            }
+
+            element.hidden = false;
+            element.className = 'ajax-message ' + type;
+            element.textContent = message;
+        }
+
+        function clearMessage(element) {
+            if (!element) {
+                return;
+            }
+
+            element.hidden = true;
+            element.className = 'ajax-message';
+            element.textContent = '';
+        }
+
+        function escapeHtml(value) {
+            return String(value || '')
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#039;');
+        }
+
+        const reviewForm = document.getElementById('product-review-form');
+
+        if (reviewForm) {
+            const reviewMessage = document.getElementById('product-review-message');
+            const reviewSubmit = document.getElementById('product-review-submit');
+            const reviewList = document.getElementById('review-list');
+            const emptyReviewsText = document.getElementById('empty-reviews-text');
+
+            reviewForm.addEventListener('submit', async function (event) {
+                event.preventDefault();
+
+                clearMessage(reviewMessage);
+
+                if (reviewSubmit) {
+                    reviewSubmit.disabled = true;
+                    reviewSubmit.textContent = 'Gönderiliyor...';
+                }
+
+                try {
+                    const formData = new FormData(reviewForm);
+                    const rating = formData.get('rating');
+                    const comment = formData.get('comment');
+
+                    const response = await fetch(reviewForm.action, {
+                        method: 'POST',
+                        body: formData,
+                        headers: {
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'Accept': 'application/json'
+                        }
+                    });
+
+                    const result = await response.json();
+
+                    if (!result.success) {
+                        throw new Error(result.message || 'Yorum gönderilemedi.');
+                    }
+
+                    showMessage(reviewMessage, 'success', result.message || 'Yorum başarıyla gönderildi.');
+
+                    if (emptyReviewsText) {
+                        emptyReviewsText.remove();
+                    }
+
+                    let targetReviewList = reviewList;
+
+                    if (!targetReviewList) {
+                        targetReviewList = document.createElement('div');
+                        targetReviewList.id = 'review-list';
+                        targetReviewList.className = 'review-list';
+                        document.getElementById('reviews').appendChild(targetReviewList);
+                    }
+
+                    const article = document.createElement('article');
+                    article.className = 'review-item';
+                    article.innerHTML = `
+                        <strong>${escapeHtml(currentUserName)} · ⭐ ${escapeHtml(rating)}</strong>
+                        <p>${escapeHtml(comment).replaceAll('\n', '<br>')}</p>
+                        <span>Az önce</span>
+                    `;
+
+                    targetReviewList.prepend(article);
+
+                    reviewForm.reset();
+
+                    const orderSelect = reviewForm.querySelector('select[name="order_item_id"]');
+
+                    if (orderSelect && orderSelect.value) {
+                        orderSelect.querySelector('option[value="' + orderSelect.value + '"]')?.remove();
+                    }
+
+                    const hiddenOrderItem = reviewForm.querySelector('input[name="order_item_id"][type="hidden"]');
+
+                    if (hiddenOrderItem) {
+                        reviewForm.style.display = 'none';
+                    }
+
+                    if (orderSelect && orderSelect.options.length <= 1) {
+                        reviewForm.style.display = 'none';
+                    }
+                } catch (error) {
+                    showMessage(reviewMessage, 'error', error.message || 'Yorum gönderilirken bir hata oluştu.');
+                } finally {
+                    if (reviewSubmit) {
+                        reviewSubmit.disabled = false;
+                        reviewSubmit.textContent = 'Yorumu Gönder';
+                    }
+                }
+            });
+        }
+
+        const questionForm = document.getElementById('product-question-form');
+
+        if (questionForm) {
+            const questionMessage = document.getElementById('product-question-message');
+            const questionSubmit = document.getElementById('product-question-submit');
+            const questionList = document.getElementById('question-list');
+            const emptyQuestionsText = document.getElementById('empty-questions-text');
+
+            questionForm.addEventListener('submit', async function (event) {
+                event.preventDefault();
+
+                clearMessage(questionMessage);
+
+                if (questionSubmit) {
+                    questionSubmit.disabled = true;
+                    questionSubmit.textContent = 'Gönderiliyor...';
+                }
+
+                try {
+                    const formData = new FormData(questionForm);
+                    const question = formData.get('question');
+
+                    const response = await fetch(questionForm.action, {
+                        method: 'POST',
+                        body: formData,
+                        headers: {
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'Accept': 'application/json'
+                        }
+                    });
+
+                    const result = await response.json();
+
+                    if (!result.success) {
+                        throw new Error(result.message || 'Soru gönderilemedi.');
+                    }
+
+                    showMessage(questionMessage, 'success', result.message || 'Sorun üreticiye gönderildi.');
+
+                    if (emptyQuestionsText) {
+                        emptyQuestionsText.remove();
+                    }
+
+                    let targetQuestionList = questionList;
+
+                    if (!targetQuestionList) {
+                        targetQuestionList = document.createElement('div');
+                        targetQuestionList.id = 'question-list';
+                        targetQuestionList.className = 'question-list';
+                        document.getElementById('questions').appendChild(targetQuestionList);
+                    }
+
+                    const article = document.createElement('article');
+                    article.className = 'question-item';
+                    article.innerHTML = `
+                        <div class="question-content">
+                            <strong>${escapeHtml(currentUserName)} sordu:</strong>
+                            <p>${escapeHtml(question).replaceAll('\n', '<br>')}</p>
+                            <span>Az önce</span>
+                        </div>
+                        <div class="answer-pending">
+                            Üretici cevabı bekleniyor.
+                        </div>
+                    `;
+
+                    targetQuestionList.prepend(article);
+
+                    questionForm.reset();
+                } catch (error) {
+                    showMessage(
+                        questionMessage,
+                        'error',
+                        error.message || 'Soru gönderilirken bir hata oluştu. Bir sonraki adımda soru API dosyasını ekleyeceğiz.'
+                    );
+                } finally {
+                    if (questionSubmit) {
+                        questionSubmit.disabled = false;
+                        questionSubmit.textContent = 'Soruyu Gönder';
+                    }
+                }
+            });
+        }
+    });
+</script>
 
 <?php require APP_PATH . '/Views/layouts/footer.php'; ?>

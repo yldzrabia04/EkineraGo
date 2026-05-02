@@ -57,12 +57,22 @@ require_app_file('Models/ProductImage.php');
 require_app_file('Models/Cart.php');
 require_app_file('Models/CartItem.php');
 require_app_file('Models/WalletTransaction.php');
+
 require_app_file('Models/Order.php');
 require_app_file('Models/OrderItem.php');
 require_app_file('Models/Shipment.php');
+
 require_app_file('Models/Review.php');
 require_app_file('Models/Favorite.php');
 require_app_file('Models/Notification.php');
+
+/*
+|--------------------------------------------------------------------------
+| Yeni Soru-Cevap Modeli
+|--------------------------------------------------------------------------
+*/
+
+require_app_file('Models/ProductQuestion.php');
 
 /*
 |--------------------------------------------------------------------------
@@ -77,8 +87,17 @@ require_app_file('Services/WalletService.php');
 require_app_file('Services/CheckoutService.php');
 require_app_file('Services/OrderService.php');
 require_app_file('Services/ShippingService.php');
+
 require_app_file('Services/ReviewService.php');
 require_app_file('Services/NotificationService.php');
+
+/*
+|--------------------------------------------------------------------------
+| Yeni Soru-Cevap Service
+|--------------------------------------------------------------------------
+*/
+
+require_app_file('Services/ProductQuestionService.php');
 
 /*
 |--------------------------------------------------------------------------
@@ -93,6 +112,18 @@ require_app_file('Controllers/CartController.php');
 require_app_file('Controllers/WalletController.php');
 require_app_file('Controllers/CheckoutController.php');
 require_app_file('Controllers/OrderController.php');
+
 require_app_file('Controllers/ReviewController.php');
 require_app_file('Controllers/FavoriteController.php');
 require_app_file('Controllers/NotificationController.php');
+
+/*
+|--------------------------------------------------------------------------
+| Yeni Soru-Cevap Controller
+|--------------------------------------------------------------------------
+| Şu an API dosyaları direkt ProductQuestionService kullanıyor.
+| İleride ProductQuestionController.php oluşturursak otomatik yüklensin diye bıraktık.
+|--------------------------------------------------------------------------
+*/
+
+require_app_file('Controllers/ProductQuestionController.php');
