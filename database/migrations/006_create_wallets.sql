@@ -1,4 +1,4 @@
-﻿USE ekinerago;
+USE ekinerago;
 
 CREATE TABLE IF NOT EXISTS wallets (
     user_id BIGINT UNSIGNED PRIMARY KEY,

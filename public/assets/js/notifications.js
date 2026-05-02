@@ -1,1 +1,1 @@
-﻿// TODO: notifications.js
+// TODO: notifications.js

@@ -1,4 +1,4 @@
-﻿USE ekinerago;
+USE ekinerago;
 
 CREATE TABLE IF NOT EXISTS reviews (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

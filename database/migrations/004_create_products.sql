@@ -1,4 +1,4 @@
-﻿USE ekinerago;
+USE ekinerago;
 
 CREATE TABLE IF NOT EXISTS categories (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

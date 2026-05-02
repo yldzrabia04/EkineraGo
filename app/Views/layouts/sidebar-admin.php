@@ -1,1 +1,1 @@
-﻿<!-- TODO: sidebar-admin.php layout -->
+<!-- TODO: sidebar-admin.php layout -->

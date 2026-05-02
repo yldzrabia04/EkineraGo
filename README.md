@@ -1,4 +1,4 @@
-﻿# EkineraGo
+# EkineraGo
 
 EkineraGo, yerel gÄ±da Ã¼reticileriyle tÃ¼keticileri doÄŸrudan buluÅŸturan bir web platformudur.
 

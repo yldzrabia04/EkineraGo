@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 
 $pageTitle = $pageTitle ?? APP_NAME;
 $bodyClass = $bodyClass ?? '';

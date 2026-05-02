@@ -1,4 +1,4 @@
-﻿USE ekinerago;
+USE ekinerago;
 
 CREATE TABLE IF NOT EXISTS consumer_profiles (
     user_id BIGINT UNSIGNED PRIMARY KEY,

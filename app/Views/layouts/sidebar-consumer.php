@@ -1,1 +1,1 @@
-﻿<!-- TODO: sidebar-consumer.php layout -->
+<!-- TODO: sidebar-consumer.php layout -->

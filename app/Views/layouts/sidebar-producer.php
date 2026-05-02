@@ -1,1 +1,1 @@
-﻿<!-- TODO: sidebar-producer.php layout -->
+<!-- TODO: sidebar-producer.php layout -->
