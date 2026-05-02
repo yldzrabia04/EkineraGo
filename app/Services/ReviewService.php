@@ -1,298 +1,282 @@
 ﻿<?php
 
-require_once __DIR__ . '/../../app/bootstrap.php';
+class ReviewService
+{
+    private PDO $pdo;
 
-ConsumerMiddleware::handle();
-
-$userId = (int) currentUserId();
-
-if (is_post()) {
-    require_csrf();
-
-    $action = $_POST['_action'] ?? '';
-
-    if ($action === 'read') {
-        $notificationId = (int) ($_POST['notification_id'] ?? 0);
-
-        if ($notificationId <= 0) {
-            flash_error('Geçerli bir bildirim bulunamadı.');
-            redirect('consumer/notifications.php');
+    public function __construct(?PDO $pdo = null)
+    {
+        if ($pdo instanceof PDO) {
+            $this->pdo = $pdo;
+            return;
         }
+
+        if (function_exists('db')) {
+            $this->pdo = db();
+            return;
+        }
+
+        if (isset($GLOBALS['pdo']) && $GLOBALS['pdo'] instanceof PDO) {
+            $this->pdo = $GLOBALS['pdo'];
+            return;
+        }
+
+        throw new RuntimeException('PDO bağlantısı bulunamadı.');
+    }
+
+    public function canReview(int $consumerId, int $orderItemId): array
+    {
+        if ($consumerId <= 0) {
+            return [
+                'success' => false,
+                'message' => 'Yorum yapabilmek için giriş yapmalısınız.',
+            ];
+        }
+
+        if ($orderItemId <= 0) {
+            return [
+                'success' => false,
+                'message' => 'Geçerli bir sipariş ürünü seçilmedi.',
+            ];
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT 
+                oi.id AS order_item_id,
+                oi.product_id,
+                o.id AS order_id,
+                o.consumer_id,
+                o.producer_id,
+                o.order_status
+            FROM order_items oi
+            INNER JOIN orders o ON o.id = oi.order_id
+            WHERE oi.id = :order_item_id
+            LIMIT 1
+        ");
+
+        $stmt->execute([
+            ':order_item_id' => $orderItemId,
+        ]);
+
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$row) {
+            return [
+                'success' => false,
+                'message' => 'Sipariş ürünü bulunamadı.',
+            ];
+        }
+
+        if ((int) $row['consumer_id'] !== $consumerId) {
+            return [
+                'success' => false,
+                'message' => 'Bu sipariş ürünü size ait değil.',
+            ];
+        }
+
+        if (($row['order_status'] ?? '') !== 'delivered') {
+            return [
+                'success' => false,
+                'message' => 'Sadece teslim edilmiş sipariş ürünlerine yorum yapabilirsiniz.',
+            ];
+        }
+
+        if ($this->hasReviewForOrderItem($orderItemId)) {
+            return [
+                'success' => false,
+                'message' => 'Bu sipariş ürünü için daha önce yorum yapılmış.',
+            ];
+        }
+
+        return [
+            'success' => true,
+            'message' => 'Yorum yapılabilir.',
+            'data' => $row,
+        ];
+    }
+
+    public function createReview(int $consumerId, array $input): array
+    {
+        $orderItemId = (int) ($input['order_item_id'] ?? 0);
+        $rating = (int) ($input['rating'] ?? 0);
+        $comment = trim((string) ($input['comment'] ?? ''));
+
+        $errors = [];
+
+        if ($orderItemId <= 0) {
+            $errors['order_item_id'][] = 'Geçerli bir sipariş ürünü seçilmedi.';
+        }
+
+        if ($rating < 1 || $rating > 5) {
+            $errors['rating'][] = 'Puan 1 ile 5 arasında olmalıdır.';
+        }
+
+        if (mb_strlen($comment) > 1000) {
+            $errors['comment'][] = 'Yorum en fazla 1000 karakter olabilir.';
+        }
+
+        if (!empty($errors)) {
+            return [
+                'success' => false,
+                'message' => 'Lütfen formdaki hataları düzeltin.',
+                'errors' => $errors,
+            ];
+        }
+
+        $canReview = $this->canReview($consumerId, $orderItemId);
+
+        if (!$canReview['success']) {
+            return [
+                'success' => false,
+                'message' => $canReview['message'],
+                'errors' => [],
+            ];
+        }
+
+        $data = $canReview['data'];
+        $producerId = (int) $data['producer_id'];
+        $productId = isset($data['product_id']) ? (int) $data['product_id'] : null;
 
         try {
-            Notification::markAsRead($userId, $notificationId);
-            flash_success('Bildirim okundu olarak işaretlendi.');
+            $this->pdo->beginTransaction();
+
+            $stmt = $this->pdo->prepare("
+                INSERT INTO reviews (
+                    order_item_id,
+                    consumer_id,
+                    producer_id,
+                    product_id,
+                    rating,
+                    comment,
+                    status,
+                    created_at
+                ) VALUES (
+                    :order_item_id,
+                    :consumer_id,
+                    :producer_id,
+                    :product_id,
+                    :rating,
+                    :comment,
+                    'visible',
+                    NOW()
+                )
+            ");
+
+            $stmt->execute([
+                ':order_item_id' => $orderItemId,
+                ':consumer_id' => $consumerId,
+                ':producer_id' => $producerId,
+                ':product_id' => $productId,
+                ':rating' => $rating,
+                ':comment' => $comment !== '' ? $comment : null,
+            ]);
+
+            $this->updateProductRating($productId);
+            $this->updateProducerRating($producerId);
+
+            $this->pdo->commit();
+
+            return [
+                'success' => true,
+                'message' => 'Yorum başarıyla oluşturuldu.',
+            ];
         } catch (Throwable $e) {
-            flash_error('Bildirim güncellenirken bir hata oluştu.');
-        }
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
 
-        redirect('consumer/notifications.php');
+            return [
+                'success' => false,
+                'message' => 'Yorum kaydedilirken bir hata oluştu.',
+                'errors' => [],
+            ];
+        }
     }
 
-    if ($action === 'read_all') {
-        try {
-            Notification::markAllAsRead($userId);
-            flash_success('Tüm bildirimler okundu olarak işaretlendi.');
-        } catch (Throwable $e) {
-            flash_error('Bildirimler güncellenirken bir hata oluştu.');
-        }
-
-        redirect('consumer/notifications.php');
-    }
-
-    flash_error('Geçersiz bildirim işlemi.');
-    redirect('consumer/notifications.php');
-}
-
-$notifications = Notification::getByUserId($userId);
-$unreadCount = Notification::unreadCount($userId);
-
-$pageTitle = 'Bildirimler';
-$bodyClass = 'page-consumer-notifications';
-
-require APP_PATH . '/Views/layouts/header.php';
-
-if (!function_exists('notification_type_label')) {
-    function notification_type_label(string $type): string
+    public function hasReviewForOrderItem(int $orderItemId): bool
     {
-        return match ($type) {
-            'order_created' => 'Sipariş',
-            'order_status_changed' => 'Sipariş Durumu',
-            'new_order' => 'Yeni Sipariş',
-            'restock_alert' => 'Stok Bildirimi',
-            'favorite_product_updated' => 'Favori Ürün',
-            default => 'Bildirim',
-        };
-    }
-}
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*)
+            FROM reviews
+            WHERE order_item_id = :order_item_id
+        ");
 
-if (!function_exists('notification_badge_class')) {
-    function notification_badge_class(string $type): string
+        $stmt->execute([
+            ':order_item_id' => $orderItemId,
+        ]);
+
+        return (int) $stmt->fetchColumn() > 0;
+    }
+
+    private function updateProductRating(?int $productId): void
     {
-        return match ($type) {
-            'order_created', 'new_order' => 'badge-success',
-            'order_status_changed' => 'badge-info',
-            'restock_alert' => 'badge-warning',
-            default => 'badge-muted',
-        };
+        if ($productId === null || $productId <= 0) {
+            return;
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT 
+                COALESCE(AVG(rating), 0) AS average_rating,
+                COUNT(*) AS rating_count
+            FROM reviews
+            WHERE product_id = :product_id
+            AND status = 'visible'
+        ");
+
+        $stmt->execute([
+            ':product_id' => $productId,
+        ]);
+
+        $ratingData = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        $update = $this->pdo->prepare("
+            UPDATE products
+            SET 
+                average_rating = :average_rating,
+                rating_count = :rating_count
+            WHERE id = :product_id
+        ");
+
+        $update->execute([
+            ':average_rating' => round((float) $ratingData['average_rating'], 2),
+            ':rating_count' => (int) $ratingData['rating_count'],
+            ':product_id' => $productId,
+        ]);
+    }
+
+    private function updateProducerRating(int $producerId): void
+    {
+        if ($producerId <= 0) {
+            return;
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT 
+                COALESCE(AVG(rating), 0) AS average_rating,
+                COUNT(*) AS rating_count
+            FROM reviews
+            WHERE producer_id = :producer_id
+            AND status = 'visible'
+        ");
+
+        $stmt->execute([
+            ':producer_id' => $producerId,
+        ]);
+
+        $ratingData = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        $update = $this->pdo->prepare("
+            UPDATE producer_profiles
+            SET 
+                average_rating = :average_rating,
+                rating_count = :rating_count
+            WHERE user_id = :producer_id
+        ");
+
+        $update->execute([
+            ':average_rating' => round((float) $ratingData['average_rating'], 2),
+            ':rating_count' => (int) $ratingData['rating_count'],
+            ':producer_id' => $producerId,
+        ]);
     }
 }
-?>
-
-<main class="container">
-    <section class="card page-heading">
-        <div>
-            <h1>Bildirimler</h1>
-
-            <p>
-                Sipariş durumları, stok bildirimleri ve sistem mesajları burada listelenir.
-            </p>
-        </div>
-
-        <?php if ($unreadCount > 0): ?>
-            <form method="POST" action="<?= e(url('consumer/notifications.php')) ?>">
-                <?= csrf_field() ?>
-
-                <input type="hidden" name="_action" value="read_all">
-
-                <button class="btn btn-secondary" type="submit">
-                    Tümünü Okundu Yap
-                </button>
-            </form>
-        <?php endif; ?>
-    </section>
-
-    <section class="card notification-summary">
-        <strong>Okunmamış Bildirim:</strong>
-        <?= e((string) $unreadCount) ?>
-    </section>
-
-    <?php if (empty($notifications)): ?>
-        <section class="card empty-state">
-            <h2>Henüz bildirimin yok</h2>
-
-            <p>
-                Sipariş oluşturduğunda veya sipariş durumun güncellendiğinde bildirimler burada görünecek.
-            </p>
-        </section>
-    <?php else: ?>
-        <section class="notification-list">
-            <?php foreach ($notifications as $notification): ?>
-                <?php
-                    $isRead = !empty($notification['is_read']);
-                    $type = $notification['type'] ?? '';
-                ?>
-
-                <article class="card notification-card <?= $isRead ? '' : 'unread' ?>">
-                    <div class="notification-content">
-                        <div class="notification-title-row">
-                            <span class="badge <?= e(notification_badge_class($type)) ?>">
-                                <?= e(notification_type_label($type)) ?>
-                            </span>
-
-                            <?php if (!$isRead): ?>
-                                <span class="unread-dot">Okunmamış</span>
-                            <?php endif; ?>
-                        </div>
-
-                        <h2><?= e($notification['title'] ?? 'Bildirim') ?></h2>
-
-                        <p>
-                            <?= nl2br(e($notification['message'] ?? '')) ?>
-                        </p>
-
-                        <span class="notification-date">
-                            <?= !empty($notification['created_at'])
-                                ? e(date('d.m.Y H:i', strtotime($notification['created_at'])))
-                                : '-'
-                            ?>
-                        </span>
-                    </div>
-
-                    <div class="notification-actions">
-                        <?php if (!$isRead): ?>
-                            <form method="POST" action="<?= e(url('consumer/notifications.php')) ?>">
-                                <?= csrf_field() ?>
-
-                                <input type="hidden" name="_action" value="read">
-                                <input type="hidden" name="notification_id" value="<?= e((string) $notification['id']) ?>">
-
-                                <button class="btn btn-secondary" type="submit">
-                                    Okundu Yap
-                                </button>
-                            </form>
-                        <?php else: ?>
-                            <span class="read-label">
-                                Okundu
-                            </span>
-                        <?php endif; ?>
-                    </div>
-                </article>
-            <?php endforeach; ?>
-        </section>
-    <?php endif; ?>
-</main>
-
-<style>
-    .page-heading {
-        margin-bottom: 22px;
-        display: flex;
-        justify-content: space-between;
-        gap: 18px;
-        align-items: center;
-    }
-
-    .page-heading h1,
-    .notification-card h2,
-    .empty-state h2 {
-        margin-top: 0;
-        color: #245c2f;
-    }
-
-    .page-heading p,
-    .notification-card p,
-    .empty-state p {
-        color: #526052;
-        line-height: 1.5;
-    }
-
-    .notification-summary {
-        margin-bottom: 22px;
-        color: #245c2f;
-    }
-
-    .notification-list {
-        display: grid;
-        gap: 16px;
-    }
-
-    .notification-card {
-        display: flex;
-        justify-content: space-between;
-        gap: 16px;
-        align-items: center;
-        border-left: 5px solid transparent;
-    }
-
-    .notification-card.unread {
-        border-left-color: #2f7d3d;
-    }
-
-    .notification-title-row {
-        display: flex;
-        gap: 8px;
-        flex-wrap: wrap;
-        align-items: center;
-        margin-bottom: 10px;
-    }
-
-    .badge {
-        display: inline-block;
-        padding: 6px 10px;
-        border-radius: 999px;
-        font-size: 13px;
-        font-weight: bold;
-        white-space: nowrap;
-    }
-
-    .badge-success {
-        background: #e7f7e8;
-        color: #236b2c;
-    }
-
-    .badge-warning {
-        background: #fff5d6;
-        color: #8a6200;
-    }
-
-    .badge-info {
-        background: #e8f1ff;
-        color: #1f4e8c;
-    }
-
-    .badge-muted {
-        background: #edf1ea;
-        color: #526052;
-    }
-
-    .unread-dot {
-        color: #2f7d3d;
-        font-weight: bold;
-        font-size: 14px;
-    }
-
-    .notification-date {
-        color: #718071;
-        font-size: 14px;
-    }
-
-    .notification-actions {
-        min-width: 130px;
-        display: flex;
-        justify-content: flex-end;
-    }
-
-    .read-label {
-        color: #718071;
-        font-weight: bold;
-    }
-
-    .empty-state {
-        text-align: center;
-        padding: 34px;
-    }
-
-    @media (max-width: 768px) {
-        .page-heading,
-        .notification-card {
-            align-items: flex-start;
-            flex-direction: column;
-        }
-
-        .notification-actions {
-            justify-content: flex-start;
-        }
-    }
-</style>
-
-<?php require APP_PATH . '/Views/layouts/footer.php'; ?>
