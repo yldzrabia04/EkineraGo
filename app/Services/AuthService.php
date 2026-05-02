@@ -115,11 +115,13 @@ class AuthService
     }
 
     public function redirectPathForUser(array $user): string
-{
-    return match ($user['role']) {
-        ROLE_PRODUCER => 'producer/dashboard.php',
-        default => 'index.php',
-    };
+    {
+        return match ($user['role']) {
+            ROLE_PRODUCER => 'producer/dashboard.php',
+            ROLE_ADMIN => 'admin/dashboard.php',
+            ROLE_CONSUMER => 'consumer/dashboard.php',
+            default => 'index.php',
+        };
     }
 
     private function normalizeRegisterData(array $data): array

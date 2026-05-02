@@ -69,6 +69,14 @@ if (!function_exists('requireGuest')) {
                 redirect('producer/dashboard.php');
             }
 
+            if (($user['role'] ?? '') === ROLE_ADMIN) {
+                redirect('admin/dashboard.php');
+            }
+
+            if (($user['role'] ?? '') === ROLE_CONSUMER) {
+                redirect('consumer/dashboard.php');
+            }
+
             redirect('index.php');
         }
     }

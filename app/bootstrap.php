@@ -2,27 +2,97 @@
 
 require_once __DIR__ . '/../config/database.php';
 
-require_once APP_PATH . '/Helpers/response.php';
-require_once APP_PATH . '/Helpers/flash.php';
-require_once APP_PATH . '/Helpers/csrf.php';
-require_once APP_PATH . '/Helpers/auth.php';
-require_once APP_PATH . '/Helpers/slug.php';
-require_once APP_PATH . '/Helpers/money.php';
-require_once APP_PATH . '/Helpers/order_number.php';
-require_once APP_PATH . '/Helpers/validation.php';
-require_once APP_PATH . '/Helpers/upload.php';
+function require_app_file(string $path): void
+{
+    $fullPath = APP_PATH . '/' . ltrim($path, '/');
 
-require_once APP_PATH . '/Middlewares/AuthMiddleware.php';
-require_once APP_PATH . '/Middlewares/GuestMiddleware.php';
-require_once APP_PATH . '/Middlewares/ConsumerMiddleware.php';
-require_once APP_PATH . '/Middlewares/ProducerMiddleware.php';
-require_once APP_PATH . '/Middlewares/AdminMiddleware.php';
+    if (file_exists($fullPath)) {
+        require_once $fullPath;
+    }
+}
 
-require_once APP_PATH . '/Models/User.php';
-require_once APP_PATH . '/Models/ConsumerProfile.php';
-require_once APP_PATH . '/Models/ProducerProfile.php';
-require_once APP_PATH . '/Models/Wallet.php';
+/*
+|--------------------------------------------------------------------------
+| Helpers
+|--------------------------------------------------------------------------
+*/
 
-require_once APP_PATH . '/Services/AuthService.php';
+require_app_file('Helpers/response.php');
+require_app_file('Helpers/flash.php');
+require_app_file('Helpers/csrf.php');
+require_app_file('Helpers/auth.php');
+require_app_file('Helpers/slug.php');
+require_app_file('Helpers/money.php');
+require_app_file('Helpers/order_number.php');
+require_app_file('Helpers/validation.php');
+require_app_file('Helpers/upload.php');
 
-require_once APP_PATH . '/Controllers/AuthController.php';
+/*
+|--------------------------------------------------------------------------
+| Middlewares
+|--------------------------------------------------------------------------
+*/
+
+require_app_file('Middlewares/AuthMiddleware.php');
+require_app_file('Middlewares/GuestMiddleware.php');
+require_app_file('Middlewares/ConsumerMiddleware.php');
+require_app_file('Middlewares/ProducerMiddleware.php');
+require_app_file('Middlewares/AdminMiddleware.php');
+
+/*
+|--------------------------------------------------------------------------
+| Models
+|--------------------------------------------------------------------------
+*/
+
+require_app_file('Models/User.php');
+require_app_file('Models/ConsumerProfile.php');
+require_app_file('Models/ProducerProfile.php');
+require_app_file('Models/Wallet.php');
+
+require_app_file('Models/Category.php');
+require_app_file('Models/Product.php');
+require_app_file('Models/ProductImage.php');
+
+require_app_file('Models/Cart.php');
+require_app_file('Models/CartItem.php');
+require_app_file('Models/WalletTransaction.php');
+require_app_file('Models/Order.php');
+require_app_file('Models/OrderItem.php');
+require_app_file('Models/Shipment.php');
+require_app_file('Models/Review.php');
+require_app_file('Models/Favorite.php');
+require_app_file('Models/Notification.php');
+
+/*
+|--------------------------------------------------------------------------
+| Services
+|--------------------------------------------------------------------------
+*/
+
+require_app_file('Services/AuthService.php');
+require_app_file('Services/ProductService.php');
+require_app_file('Services/CartService.php');
+require_app_file('Services/WalletService.php');
+require_app_file('Services/CheckoutService.php');
+require_app_file('Services/OrderService.php');
+require_app_file('Services/ShippingService.php');
+require_app_file('Services/ReviewService.php');
+require_app_file('Services/NotificationService.php');
+
+/*
+|--------------------------------------------------------------------------
+| Controllers
+|--------------------------------------------------------------------------
+*/
+
+require_app_file('Controllers/AuthController.php');
+require_app_file('Controllers/ProductController.php');
+require_app_file('Controllers/ProducerController.php');
+require_app_file('Controllers/CartController.php');
+require_app_file('Controllers/WalletController.php');
+require_app_file('Controllers/CheckoutController.php');
+require_app_file('Controllers/OrderController.php');
+require_app_file('Controllers/ReviewController.php');
+require_app_file('Controllers/FavoriteController.php');
+require_app_file('Controllers/NotificationController.php');
