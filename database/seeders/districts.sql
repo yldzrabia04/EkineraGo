@@ -1,1 +1,3 @@
-﻿-- TODO: Seeder: districts.sql
+﻿USE ekinerago;
+
+SET NAMES utf8mb4;
