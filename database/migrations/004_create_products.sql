@@ -1,0 +1,1 @@
+﻿-- TODO: Migration: 004_create_products.sql

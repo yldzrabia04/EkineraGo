@@ -1,0 +1,1 @@
+﻿-- TODO: Migration: 006_create_wallets.sql

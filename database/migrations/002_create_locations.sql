@@ -1,0 +1,1 @@
+﻿-- TODO: Migration: 002_create_locations.sql

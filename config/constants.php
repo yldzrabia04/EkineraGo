@@ -1,0 +1,4 @@
+﻿<?php
+
+// TODO: Global constants
+

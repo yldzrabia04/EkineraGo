@@ -1,0 +1,11 @@
+﻿{
+    "name": "ekinerago/ekinerago",
+    "description": "Yerel gÄ±da Ã¼reticileri ile tÃ¼keticileri buluÅŸturan PHP web platformu.",
+    "type": "project",
+    "require": {},
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/"
+        }
+    }
+}
