@@ -11,15 +11,58 @@ $orderItemId = (int) ($orderItemId ?? ($_GET['review_order_item_id'] ?? ($_GET['
 if (is_post()) {
     $controller = new ReviewController();
     $controller->store();
+    exit;
 }
 
-$reviewService = new ReviewService();
-$canReview = $reviewService->canReview((int) currentUserId(), $orderItemId);
+$consumerId = (int) currentUserId();
 
-$orderItem = $orderItemId > 0 ? OrderItem::findById($orderItemId) : null;
-$order = $orderItem ? Order::findById((int) $orderItem['order_id']) : null;
+if (!isset($reviewCheck)) {
+    $reviewService = new ReviewService();
+    $reviewCheck = $reviewService->canReview($consumerId, $orderItemId);
+}
 
-$formErrors = errors();
+$canReview = $reviewCheck;
+$reviewData = $canReview['data'] ?? [];
+
+$orderItem = null;
+$order = null;
+
+if ($orderItemId > 0 && class_exists('OrderItem')) {
+    $orderItem = OrderItem::findById($orderItemId);
+}
+
+if ($orderItem && class_exists('Order')) {
+    $order = Order::findById((int) $orderItem['order_id']);
+}
+
+$productTitle = $reviewData['product_title']
+    ?? $reviewData['product_title_snapshot']
+    ?? $orderItem['product_title_snapshot']
+    ?? 'Ürün';
+
+$orderNo = $reviewData['order_no']
+    ?? $order['order_no']
+    ?? '-';
+
+$productId = isset($reviewData['product_id']) && $reviewData['product_id'] !== null
+    ? (int) $reviewData['product_id']
+    : (int) ($orderItem['product_id'] ?? 0);
+
+$formErrors = function_exists('errors') ? errors() : [];
+
+/*
+|------------------------------------------------------------
+| EN KRİTİK DÜZELTME
+|------------------------------------------------------------
+| Form ayrı bir public/reviews/create.php dosyasına değil,
+| bu ekranı açan route'a POST etsin.
+*/
+$formAction = url('consumer/orders.php?review_order_item_id=' . $orderItemId);
+
+$ordersUrl = url('consumer/orders.php');
+$productUrl = $productId > 0
+    ? url('product-detail.php?id=' . $productId . '#reviews')
+    : $ordersUrl;
 
 $pageTitle = 'Yorum Yap';
 $bodyClass = 'page-review-create';
@@ -44,7 +87,7 @@ require APP_PATH . '/Views/layouts/header.php';
                 <?= e($canReview['message'] ?? 'Bu ürün için yorum yapılamaz.') ?>
             </p>
 
-            <a class="btn" href="<?= e(url('consumer/orders.php')) ?>">
+            <a class="btn" href="<?= e($ordersUrl) ?>">
                 Siparişlerime Dön
             </a>
         </section>
@@ -55,16 +98,16 @@ require APP_PATH . '/Views/layouts/header.php';
                     Ürün Fotoğrafı
                 </div>
 
-                <h2><?= e($orderItem['product_title_snapshot'] ?? 'Ürün') ?></h2>
+                <h2><?= e($productTitle) ?></h2>
 
                 <p>
                     Sipariş No:
-                    <?= e($order['order_no'] ?? '-') ?>
+                    <strong><?= e($orderNo) ?></strong>
                 </p>
 
                 <p>
                     Sipariş ürünü ID:
-                    <?= e((string) $orderItemId) ?>
+                    <strong><?= e((string) $orderItemId) ?></strong>
                 </p>
 
                 <span class="badge badge-success">
@@ -75,10 +118,22 @@ require APP_PATH . '/Views/layouts/header.php';
             <div class="card">
                 <h2>Yorum Bilgileri</h2>
 
-                <form method="POST" action="<?= e(url('consumer/orders.php?review_order_item_id=' . $orderItemId)) ?>" class="review-form">
+                <div
+                    id="review-form-message"
+                    class="review-form-message"
+                    hidden
+                ></div>
+
+                <form
+                    method="POST"
+                    action="<?= e($formAction) ?>"
+                    class="review-form"
+                    id="review-create-form"
+                >
                     <?= csrf_field() ?>
 
                     <input type="hidden" name="order_item_id" value="<?= e((string) $orderItemId) ?>">
+                    <input type="hidden" name="review_order_item_id" value="<?= e((string) $orderItemId) ?>">
 
                     <div class="form-group">
                         <label for="rating">Puan</label>
@@ -108,17 +163,21 @@ require APP_PATH . '/Views/layouts/header.php';
                             placeholder="Ürün tazeliği, paketleme ve üretici deneyimini yaz..."
                         ><?= e((string) old('comment')) ?></textarea>
 
+                        <div class="textarea-help">
+                            En fazla 1000 karakter.
+                        </div>
+
                         <?php if (!empty($formErrors['comment'])): ?>
                             <div class="field-error"><?= e($formErrors['comment'][0]) ?></div>
                         <?php endif; ?>
                     </div>
 
                     <div class="form-actions">
-                        <button class="btn" type="submit">
+                        <button class="btn review-submit-btn" type="submit" id="review-submit-button">
                             Yorumu Gönder
                         </button>
 
-                        <a class="btn btn-secondary" href="<?= e(url('consumer/orders.php')) ?>">
+                        <a class="btn btn-secondary" href="<?= e($ordersUrl) ?>">
                             Siparişlerime Dön
                         </a>
                     </div>
@@ -198,6 +257,12 @@ require APP_PATH . '/Views/layouts/header.php';
         font-family: Arial, sans-serif;
     }
 
+    .textarea-help {
+        margin-top: 6px;
+        font-size: 13px;
+        color: #6b7668;
+    }
+
     .field-error {
         margin-top: 6px;
         color: #9b111e;
@@ -208,6 +273,15 @@ require APP_PATH . '/Views/layouts/header.php';
         display: flex;
         gap: 12px;
         flex-wrap: wrap;
+        margin-top: 22px;
+    }
+
+    .review-submit-btn {
+        min-width: 200px;
+        font-size: 17px;
+        font-weight: 700;
+        padding: 14px 22px;
+        box-shadow: 0 8px 18px rgba(47, 125, 61, 0.18);
     }
 
     .empty-state {
@@ -215,12 +289,119 @@ require APP_PATH . '/Views/layouts/header.php';
         padding: 34px;
     }
 
+    .review-form-message {
+        margin-bottom: 16px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        font-weight: 600;
+    }
+
+    .review-form-message.success {
+        background: #e7f7e8;
+        color: #236b2c;
+    }
+
+    .review-form-message.error {
+        background: #fdeaea;
+        color: #9b111e;
+    }
+
     @media (max-width: 900px) {
         .review-layout {
             grid-template-columns: 1fr;
         }
+
+        .form-actions {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .review-submit-btn {
+            width: 100%;
+        }
     }
 </style>
 
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const form = document.getElementById('review-create-form');
+
+        if (!form) {
+            return;
+        }
+
+        const messageBox = document.getElementById('review-form-message');
+        const submitButton = document.getElementById('review-submit-button');
+        const successRedirectUrl = <?= json_encode($productUrl, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+
+        function showMessage(type, message) {
+            if (!messageBox) return;
+
+            messageBox.hidden = false;
+            messageBox.className = 'review-form-message ' + type;
+            messageBox.textContent = message;
+        }
+
+        function clearMessage() {
+            if (!messageBox) return;
+
+            messageBox.hidden = true;
+            messageBox.className = 'review-form-message';
+            messageBox.textContent = '';
+        }
+
+        form.addEventListener('submit', async function (event) {
+            event.preventDefault();
+
+            clearMessage();
+
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.textContent = 'Gönderiliyor...';
+            }
+
+            try {
+                const response = await fetch(form.action, {
+                    method: 'POST',
+                    body: new FormData(form),
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'Accept': 'application/json'
+                    }
+                });
+
+                const contentType = response.headers.get('content-type') || '';
+                let result = null;
+
+                if (contentType.includes('application/json')) {
+                    result = await response.json();
+                } else {
+                    const text = await response.text();
+                    console.error('JSON yerine dönen cevap:', text);
+                    throw new Error('Sunucu JSON yerine HTML döndürdü. Form route kontrol edilmeli.');
+                }
+
+                if (!response.ok || !result.success) {
+                    throw new Error(result.message || 'Yorum oluşturulamadı.');
+                }
+
+                showMessage('success', result.message || 'Yorum başarıyla oluşturuldu.');
+
+                setTimeout(function () {
+                    window.location.href = successRedirectUrl;
+                }, 700);
+            } catch (error) {
+                showMessage('error', error.message || 'Yorum gönderilirken bir hata oluştu.');
+            } finally {
+                if (submitButton) {
+                    submitButton.disabled = false;
+                    submitButton.textContent = 'Yorumu Gönder';
+                }
+            }
+        });
+    });
+</script>
+
 <?php require APP_PATH . '/Views/layouts/footer.php'; ?>
-<?php clear_old(); ?>
+
+<?php if (function_exists('clear_old')) clear_old(); ?>

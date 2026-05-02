@@ -2,12 +2,12 @@
 
 require_once __DIR__ . '/../../app/bootstrap.php';
 
-ConsumerMiddleware::handle();
+ProducerMiddleware::handle();
 
 $userId = (int) currentUserId();
 
-if (!function_exists('notification_data_array')) {
-    function notification_data_array(array $notification): array
+if (!function_exists('producer_notification_data_array')) {
+    function producer_notification_data_array(array $notification): array
     {
         $json = $notification['data_json'] ?? null;
 
@@ -25,13 +25,13 @@ if (!function_exists('notification_data_array')) {
     }
 }
 
-if (!function_exists('notification_safe_target')) {
-    function notification_safe_target(string $target): string
+if (!function_exists('producer_notification_safe_target')) {
+    function producer_notification_safe_target(string $target): string
     {
         $target = trim($target);
 
         if ($target === '') {
-            return 'consumer/notifications.php';
+            return 'producer/notifications.php';
         }
 
         if (
@@ -40,43 +40,42 @@ if (!function_exists('notification_safe_target')) {
             str_starts_with($target, '//') ||
             str_contains($target, '\\')
         ) {
-            return 'consumer/notifications.php';
+            return 'producer/notifications.php';
         }
 
         $target = ltrim($target, '/');
 
-        return $target !== '' ? $target : 'consumer/notifications.php';
+        return $target !== '' ? $target : 'producer/notifications.php';
     }
 }
 
-if (!function_exists('notification_target_path')) {
-    function notification_target_path(array $notification): string
+if (!function_exists('producer_notification_target_path')) {
+    function producer_notification_target_path(array $notification): string
     {
-        $data = notification_data_array($notification);
-
-        if (!empty($data['url'])) {
-            return notification_safe_target((string) $data['url']);
-        }
-
+        $data = producer_notification_data_array($notification);
         $type = (string) ($notification['type'] ?? '');
 
+        if (!empty($data['url'])) {
+            return producer_notification_safe_target((string) $data['url']);
+        }
+
+        if ($type === 'new_product_question' && !empty($data['question_id'])) {
+            return 'producer/questions.php?question_id=' . (int) $data['question_id'];
+        }
+
+        if ($type === 'new_review' && !empty($data['product_id'])) {
+            return 'product-detail.php?id=' . (int) $data['product_id'] . '#reviews';
+        }
+
         if (!empty($data['product_id'])) {
-            if ($type === 'product_question_answered') {
-                return 'product-detail.php?id=' . (int) $data['product_id'] . '#questions';
-            }
-
-            if ($type === 'new_review') {
-                return 'product-detail.php?id=' . (int) $data['product_id'] . '#reviews';
-            }
-
             return 'product-detail.php?id=' . (int) $data['product_id'];
         }
 
         if (!empty($data['order_id']) || str_contains($type, 'order')) {
-            return 'consumer/orders.php';
+            return 'producer/orders.php';
         }
 
-        return 'consumer/notifications.php';
+        return 'producer/notifications.php';
     }
 }
 
@@ -87,14 +86,14 @@ if (is_post()) {
 
     if ($action === 'open') {
         $notificationId = (int) ($_POST['notification_id'] ?? 0);
-        $target = notification_safe_target((string) ($_POST['target'] ?? 'consumer/notifications.php'));
+        $target = producer_notification_safe_target((string) ($_POST['target'] ?? 'producer/notifications.php'));
 
         if ($notificationId > 0) {
             try {
                 Notification::markAsRead($userId, $notificationId);
             } catch (Throwable $e) {
                 flash_error('Bildirim açılırken bir hata oluştu.');
-                redirect('consumer/notifications.php');
+                redirect('producer/notifications.php');
             }
         }
 
@@ -106,7 +105,7 @@ if (is_post()) {
 
         if ($notificationId <= 0) {
             flash_error('Geçerli bir bildirim bulunamadı.');
-            redirect('consumer/notifications.php');
+            redirect('producer/notifications.php');
         }
 
         try {
@@ -116,7 +115,7 @@ if (is_post()) {
             flash_error('Bildirim güncellenirken bir hata oluştu.');
         }
 
-        redirect('consumer/notifications.php');
+        redirect('producer/notifications.php');
     }
 
     if ($action === 'read_all') {
@@ -127,44 +126,44 @@ if (is_post()) {
             flash_error('Bildirimler güncellenirken bir hata oluştu.');
         }
 
-        redirect('consumer/notifications.php');
+        redirect('producer/notifications.php');
     }
 
     flash_error('Geçersiz bildirim işlemi.');
-    redirect('consumer/notifications.php');
+    redirect('producer/notifications.php');
 }
 
 $notifications = Notification::getByUserId($userId);
 $unreadCount = Notification::unreadCount($userId);
 
-$pageTitle = 'Bildirimler';
-$bodyClass = 'page-consumer-notifications';
+$pageTitle = 'Üretici Bildirimleri';
+$bodyClass = 'page-producer-notifications';
 
 require APP_PATH . '/Views/layouts/header.php';
 
-if (!function_exists('notification_type_label')) {
-    function notification_type_label(string $type): string
+if (!function_exists('producer_notification_type_label')) {
+    function producer_notification_type_label(string $type): string
     {
         return match ($type) {
+            'new_order' => 'Yeni Sipariş',
             'order_created' => 'Sipariş',
             'order_status_changed' => 'Sipariş Durumu',
-            'new_order' => 'Yeni Sipariş',
-            'restock_alert' => 'Stok Bildirimi',
-            'favorite_product_updated' => 'Favori Ürün',
             'new_review' => 'Yeni Yorum',
             'new_product_question' => 'Ürün Sorusu',
             'product_question_answered' => 'Soru Cevabı',
+            'restock_alert' => 'Stok Bildirimi',
+            'favorite_product_updated' => 'Favori Ürün',
             default => 'Bildirim',
         };
     }
 }
 
-if (!function_exists('notification_badge_class')) {
-    function notification_badge_class(string $type): string
+if (!function_exists('producer_notification_badge_class')) {
+    function producer_notification_badge_class(string $type): string
     {
         return match ($type) {
-            'order_created', 'new_order', 'new_review', 'product_question_answered' => 'badge-success',
-            'order_status_changed', 'new_product_question' => 'badge-info',
+            'new_order', 'order_created', 'new_review' => 'badge-success',
+            'order_status_changed', 'new_product_question', 'product_question_answered' => 'badge-info',
             'restock_alert' => 'badge-warning',
             default => 'badge-muted',
         };
@@ -178,12 +177,12 @@ if (!function_exists('notification_badge_class')) {
             <h1>Bildirimler</h1>
 
             <p>
-                Sipariş durumları, ürün soruları, cevaplar ve sistem mesajları burada listelenir.
+                Yeni siparişler, ürün yorumları, tüketici soruları ve sistem mesajları burada listelenir.
             </p>
         </div>
 
         <?php if ($unreadCount > 0): ?>
-            <form method="POST" action="<?= e(url('consumer/notifications.php')) ?>">
+            <form method="POST" action="<?= e(url('producer/notifications.php')) ?>">
                 <?= csrf_field() ?>
 
                 <input type="hidden" name="_action" value="read_all">
@@ -205,8 +204,12 @@ if (!function_exists('notification_badge_class')) {
             <h2>Henüz bildirimin yok</h2>
 
             <p>
-                Sipariş oluşturduğunda, soru cevabı aldığında veya sipariş durumun güncellendiğinde bildirimler burada görünecek.
+                Ürünlerine soru sorulduğunda, yorum geldiğinde veya yeni sipariş oluştuğunda bildirimler burada görünecek.
             </p>
+
+            <a class="btn" href="<?= e(url('producer/dashboard.php')) ?>">
+                Panele Dön
+            </a>
         </section>
     <?php else: ?>
         <section class="notification-list">
@@ -214,14 +217,14 @@ if (!function_exists('notification_badge_class')) {
                 <?php
                     $isRead = !empty($notification['is_read']);
                     $type = $notification['type'] ?? '';
-                    $targetPath = notification_target_path($notification);
+                    $targetPath = producer_notification_target_path($notification);
                 ?>
 
                 <article class="card notification-card <?= $isRead ? '' : 'unread' ?>">
                     <div class="notification-content">
                         <div class="notification-title-row">
-                            <span class="badge <?= e(notification_badge_class($type)) ?>">
-                                <?= e(notification_type_label($type)) ?>
+                            <span class="badge <?= e(producer_notification_badge_class($type)) ?>">
+                                <?= e(producer_notification_type_label($type)) ?>
                             </span>
 
                             <?php if (!$isRead): ?>
@@ -244,7 +247,7 @@ if (!function_exists('notification_badge_class')) {
                     </div>
 
                     <div class="notification-actions">
-                        <form method="POST" action="<?= e(url('consumer/notifications.php')) ?>">
+                        <form method="POST" action="<?= e(url('producer/notifications.php')) ?>">
                             <?= csrf_field() ?>
 
                             <input type="hidden" name="_action" value="open">
@@ -257,7 +260,7 @@ if (!function_exists('notification_badge_class')) {
                         </form>
 
                         <?php if (!$isRead): ?>
-                            <form method="POST" action="<?= e(url('consumer/notifications.php')) ?>">
+                            <form method="POST" action="<?= e(url('producer/notifications.php')) ?>">
                                 <?= csrf_field() ?>
 
                                 <input type="hidden" name="_action" value="read">

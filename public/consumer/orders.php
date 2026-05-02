@@ -5,13 +5,14 @@ require_once __DIR__ . '/../../app/bootstrap.php';
 ConsumerMiddleware::handle();
 
 if (isset($_GET['review_order_item_id'])) {
-    $orderItemId = (int) $_GET['review_order_item_id'];
-
-    require APP_PATH . '/Views/reviews/create.php';
+    $controller = new ReviewController();
+    $controller->create();
     exit;
 }
 
 $orderService = new OrderService();
+$reviewService = new ReviewService();
+
 $userId = (int) currentUserId();
 
 $orders = $orderService->getConsumerOrders($userId);
@@ -33,6 +34,8 @@ if (!function_exists('consumer_order_unit_label')) {
         };
     }
 }
+
+$deliveredStatus = defined('ORDER_STATUS_DELIVERED') ? ORDER_STATUS_DELIVERED : 'delivered';
 ?>
 
 <main class="container">
@@ -134,6 +137,19 @@ if (!function_exists('consumer_order_unit_label')) {
                                         $quantity = (float) ($item['quantity'] ?? 0);
                                         $unitPrice = (float) ($item['unit_price'] ?? 0);
                                         $totalPrice = (float) ($item['total_price'] ?? ($quantity * $unitPrice));
+
+                                        $orderItemId = (int) ($item['id'] ?? 0);
+                                        $productId = (int) ($item['product_id'] ?? 0);
+
+                                        $isDelivered = $orderStatus === $deliveredStatus;
+                                        $hasReview = $orderItemId > 0
+                                            ? $reviewService->hasReviewForOrderItem($orderItemId)
+                                            : false;
+
+                                        $reviewCreateUrl = url('consumer/orders.php?review_order_item_id=' . $orderItemId);
+                                        $reviewViewUrl = $productId > 0
+                                            ? url('product-detail.php?id=' . $productId . '#reviews')
+                                            : url('consumer/orders.php');
                                     ?>
 
                                     <div class="order-item">
@@ -153,12 +169,23 @@ if (!function_exists('consumer_order_unit_label')) {
                                         <div class="order-item-actions">
                                             <strong><?= e(formatMoney($totalPrice)) ?></strong>
 
-                                            <?php if ($orderStatus === ORDER_STATUS_DELIVERED): ?>
+                                            <?php if ($isDelivered && !$hasReview): ?>
                                                 <a
                                                     class="small-link"
-                                                    href="<?= e(url('consumer/orders.php?review_order_item_id=' . $item['id'])) ?>"
+                                                    href="<?= e($reviewCreateUrl) ?>"
                                                 >
                                                     Yorum Yap
+                                                </a>
+                                            <?php elseif ($isDelivered && $hasReview): ?>
+                                                <span class="review-done">
+                                                    Yorum Yapıldı
+                                                </span>
+
+                                                <a
+                                                    class="small-link secondary-link"
+                                                    href="<?= e($reviewViewUrl) ?>"
+                                                >
+                                                    Yorumu Gör
                                                 </a>
                                             <?php else: ?>
                                                 <span class="muted-action">
@@ -335,6 +362,25 @@ if (!function_exists('consumer_order_unit_label')) {
         color: #2f7d3d;
         font-weight: bold;
         text-decoration: none;
+    }
+
+    .small-link:hover {
+        text-decoration: underline;
+    }
+
+    .secondary-link {
+        font-size: 13px;
+    }
+
+    .review-done {
+        display: inline-block;
+        padding: 5px 9px;
+        border-radius: 999px;
+        background: #e7f7e8;
+        color: #236b2c;
+        font-size: 13px;
+        font-weight: bold;
+        white-space: nowrap;
     }
 
     .muted-action {
