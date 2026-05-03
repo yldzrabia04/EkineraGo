@@ -13,6 +13,8 @@ $userEmail = strtolower((string) ($user['email'] ?? ''));
 
 $myBaskets = [];
 $pendingInvitations = [];
+$pageError = null;
+
 $stats = [
     'total' => 0,
     'created' => 0,
@@ -67,14 +69,10 @@ try {
     $basketStatement = db()->prepare("
         SELECT
             nb.id,
-            nb.offer_id,
-            nb.basket_type,
-            nb.visibility,
             nb.producer_id,
             nb.product_id,
             nb.creator_user_id,
             nb.title,
-            nb.creator_note,
             nb.province_id,
             nb.district_id,
             nb.neighborhood_id,
@@ -82,14 +80,17 @@ try {
             nb.current_quantity,
             nb.unit_type,
             nb.status,
-            nb.producer_status,
-            nb.discount_percent_snapshot,
-            nb.unit_price_snapshot,
-            nb.discounted_unit_price_snapshot,
             nb.expires_at,
             nb.order_id,
             nb.created_at,
             nb.updated_at,
+
+            COALESCE(nb.basket_type, 'group') AS basket_type,
+            COALESCE(nb.visibility, 'private') AS visibility,
+            COALESCE(nb.creator_note, '') AS creator_note,
+            COALESCE(nb.discount_percent_snapshot, 0) AS discount_percent_snapshot,
+            COALESCE(nb.unit_price_snapshot, p.price) AS unit_price_snapshot,
+            COALESCE(nb.discounted_unit_price_snapshot, p.price) AS discounted_unit_price_snapshot,
 
             p.title AS product_title,
             p.price AS product_price,
@@ -147,6 +148,7 @@ try {
     $myBaskets = $basketStatement->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) {
     $myBaskets = [];
+    $pageError = 'Mahalle sepetleri alınırken hata oluştu: ' . $e->getMessage();
 }
 
 try {
@@ -166,10 +168,11 @@ try {
             nb.current_quantity,
             nb.unit_type,
             nb.status AS basket_status,
-            nb.discount_percent_snapshot,
-            nb.unit_price_snapshot,
-            nb.discounted_unit_price_snapshot,
             nb.expires_at AS basket_expires_at,
+
+            COALESCE(nb.discount_percent_snapshot, 0) AS discount_percent_snapshot,
+            COALESCE(nb.unit_price_snapshot, p.price) AS unit_price_snapshot,
+            COALESCE(nb.discounted_unit_price_snapshot, p.price) AS discounted_unit_price_snapshot,
 
             p.title AS product_title,
 
@@ -204,6 +207,10 @@ try {
     $pendingInvitations = $invitationStatement->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) {
     $pendingInvitations = [];
+
+    if (!$pageError) {
+        $pageError = 'Mahalle sepeti davetleri alınırken hata oluştu: ' . $e->getMessage();
+    }
 }
 
 $stats['total'] = count($myBaskets);
@@ -287,6 +294,16 @@ require APP_PATH . '/Views/layouts/header.php';
     <section class="consumer-neighborhood-content">
         <div class="container">
 
+            <?php if ($pageError): ?>
+                <div class="page-error-box">
+                    <span>⚠️</span>
+                    <div>
+                        <strong>Sayfa açıldı ama veri alınırken hata oluştu.</strong>
+                        <p><?= e($pageError) ?></p>
+                    </div>
+                </div>
+            <?php endif; ?>
+
             <?php if ($pendingInvitations): ?>
                 <section class="pending-invites-section">
                     <div class="section-heading">
@@ -346,7 +363,9 @@ require APP_PATH . '/Views/layouts/header.php';
 
                                     <div>
                                         <span>İndirim</span>
-                                        <strong>%<?= e(number_format((float) $invitation['discount_percent_snapshot'], 2, ',', '.')) ?></strong>
+                                        <strong>
+                                            %<?= e(number_format((float) $invitation['discount_percent_snapshot'], 2, ',', '.')) ?>
+                                        </strong>
                                     </div>
                                 </div>
 
@@ -364,6 +383,10 @@ require APP_PATH . '/Views/layouts/header.php';
                                     <div class="progress-bar">
                                         <span style="width: <?= e((string) $progressPercent) ?>%;"></span>
                                     </div>
+
+                                    <small>
+                                        Hedefin %<?= e((string) $progressPercent) ?> kadarı tamamlandı.
+                                    </small>
                                 </div>
 
                                 <a
@@ -666,7 +689,8 @@ require APP_PATH . '/Views/layouts/header.php';
     .hero-stats-grid article,
     .pending-invite-card,
     .basket-card,
-    .empty-state {
+    .empty-state,
+    .page-error-box {
         border-radius: 28px;
         background: rgba(255, 255, 255, 0.92);
         border: 1px solid rgba(205, 229, 199, 0.95);
@@ -705,6 +729,32 @@ require APP_PATH . '/Views/layouts/header.php';
 
     .consumer-neighborhood-content {
         padding-top: 14px;
+    }
+
+    .page-error-box {
+        display: flex;
+        gap: 14px;
+        align-items: flex-start;
+        padding: 18px;
+        margin-bottom: 20px;
+        border-color: #ffdada;
+        background: #fff7f7;
+        color: #9b3434;
+    }
+
+    .page-error-box > span {
+        font-size: 24px;
+        flex: 0 0 auto;
+    }
+
+    .page-error-box strong {
+        display: block;
+        margin-bottom: 6px;
+    }
+
+    .page-error-box p {
+        margin: 0;
+        line-height: 1.55;
     }
 
     .pending-invites-section,
