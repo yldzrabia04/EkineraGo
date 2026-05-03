@@ -1,1013 +1,680 @@
-<?php
-
+﻿<?php
 require_once __DIR__ . '/../../app/bootstrap.php';
 
 ConsumerMiddleware::handle();
 
-$pageTitle = 'Mahalle Sepetlerim';
-$bodyClass = 'page-consumer-neighborhood-baskets';
-
-$user = currentUser();
 $userId = (int) currentUserId();
-$userEmail = strtolower((string) ($user['email'] ?? ''));
 
-$myBaskets = [];
-$pendingInvitations = [];
-$stats = [
-    'total' => 0,
-    'created' => 0,
-    'joined' => 0,
-    'pending_invites' => 0,
-    'ready' => 0,
-];
+$pageTitle = 'Bildirimlerim';
+$bodyClass = 'page-consumer-notifications';
 
-if (!function_exists('consumer_nb_status_label')) {
-    function consumer_nb_status_label(string $status): string
+if (!function_exists('consumer_notification_data')) {
+    function consumer_notification_data(array $notification): array
     {
-        return match ($status) {
-            'open' => 'Katılıma açık',
-            'ready_to_order' => 'Siparişe hazır',
-            'ordered' => 'Sipariş oluşturuldu',
-            'cancelled' => 'İptal edildi',
-            'expired' => 'Süresi doldu',
-            default => $status,
+        $json = $notification['data_json'] ?? null;
+
+        if (!$json) {
+            return [];
+        }
+
+        if (is_array($json)) {
+            return $json;
+        }
+
+        $decoded = json_decode((string) $json, true);
+
+        return is_array($decoded) ? $decoded : [];
+    }
+}
+
+if (!function_exists('consumer_notification_safe_target')) {
+    function consumer_notification_safe_target(?string $target): string
+    {
+        $target = trim((string) $target);
+
+        if ($target === '') {
+            return 'consumer/notifications.php';
+        }
+
+        if (
+            str_starts_with($target, 'http://') ||
+            str_starts_with($target, 'https://') ||
+            str_starts_with($target, '//') ||
+            str_contains($target, '\\')
+        ) {
+            return 'consumer/notifications.php';
+        }
+
+        $target = ltrim($target, '/');
+
+        return $target !== '' ? $target : 'consumer/notifications.php';
+    }
+}
+
+if (!function_exists('consumer_notification_target')) {
+    function consumer_notification_target(array $notification): string
+    {
+        $data = consumer_notification_data($notification);
+        $type = (string) ($notification['type'] ?? '');
+
+        if (!empty($data['url'])) {
+            return consumer_notification_safe_target((string) $data['url']);
+        }
+
+        if (!empty($data['target'])) {
+            return consumer_notification_safe_target((string) $data['target']);
+        }
+
+        if (!empty($data['product_id'])) {
+            $productId = (int) $data['product_id'];
+
+            if ($productId > 0) {
+                if ($type === 'product_question_answered') {
+                    return 'product-detail.php?id=' . $productId . '#questions';
+                }
+
+                if ($type === 'new_review') {
+                    return 'product-detail.php?id=' . $productId . '#reviews';
+                }
+
+                return 'product-detail.php?id=' . $productId;
+            }
+        }
+
+        if (!empty($data['order_id']) || !empty($data['order_no']) || str_contains($type, 'order')) {
+            return 'consumer/orders.php';
+        }
+
+        if (!empty($data['producer_id'])) {
+            return 'producer-detail.php?id=' . (int) $data['producer_id'];
+        }
+
+        if (!empty($data['basket_id']) || !empty($data['neighborhood_basket_id']) || str_contains($type, 'neighborhood')) {
+            return 'consumer/orders.php';
+        }
+
+        if (str_contains($type, 'wallet') || str_contains($type, 'payment') || str_contains($type, 'balance')) {
+            return 'consumer/wallet.php';
+        }
+
+        if (str_contains($type, 'favorite')) {
+            return 'consumer/favorites.php';
+        }
+
+        if (str_contains($type, 'demand')) {
+            return 'consumer/demands.php';
+        }
+
+        return 'consumer/notifications.php';
+    }
+}
+
+if (!function_exists('consumer_notification_date')) {
+    function consumer_notification_date(?string $date): string
+    {
+        if (!$date) {
+            return '-';
+        }
+
+        $timestamp = strtotime($date);
+
+        if (!$timestamp) {
+            return $date;
+        }
+
+        return date('d.m.Y H:i', $timestamp);
+    }
+}
+
+if (!function_exists('consumer_notification_type_label')) {
+    function consumer_notification_type_label(string $type): string
+    {
+        return match ($type) {
+            'order_status_changed' => 'Sipariş güncellemesi',
+            'product_question_answered' => 'Soru cevabı',
+            'new_review' => 'Yorum bildirimi',
+            'wallet_updated' => 'Bakiye hareketi',
+            'payment_received' => 'Ödeme bildirimi',
+            'neighborhood_basket' => 'Mahalle Sepeti',
+            'system' => 'Sistem bildirimi',
+            default => 'Bildirim',
         };
     }
 }
 
-if (!function_exists('consumer_nb_status_class')) {
-    function consumer_nb_status_class(string $status): string
+if (!function_exists('consumer_notification_icon')) {
+    function consumer_notification_icon(string $type): string
     {
-        return match ($status) {
-            'open' => 'status-open',
-            'ready_to_order' => 'status-ready',
-            'ordered' => 'status-ordered',
-            'cancelled' => 'status-cancelled',
-            'expired' => 'status-expired',
-            default => 'status-open',
-        };
+        if (str_contains($type, 'order')) {
+            return '📦';
+        }
+
+        if (str_contains($type, 'payment') || str_contains($type, 'wallet') || str_contains($type, 'balance')) {
+            return '💳';
+        }
+
+        if (str_contains($type, 'question')) {
+            return '💬';
+        }
+
+        if (str_contains($type, 'review')) {
+            return '⭐';
+        }
+
+        if (str_contains($type, 'neighborhood')) {
+            return '🧺';
+        }
+
+        if (str_contains($type, 'favorite')) {
+            return '♥';
+        }
+
+        return '🔔';
     }
 }
 
-if (!function_exists('consumer_nb_money')) {
-    function consumer_nb_money(float $amount): string
-    {
-        return number_format($amount, 2, ',', '.') . ' TL';
-    }
-}
+if (is_post()) {
+    require_csrf();
 
-if (!function_exists('consumer_nb_quantity')) {
-    function consumer_nb_quantity(float $quantity): string
-    {
-        return number_format($quantity, 2, ',', '.');
+    $action = $_POST['_action'] ?? '';
+
+    if ($action === 'open') {
+        $notificationId = (int) ($_POST['notification_id'] ?? 0);
+        $target = consumer_notification_safe_target($_POST['target'] ?? 'consumer/notifications.php');
+
+        if ($notificationId > 0) {
+            try {
+                Notification::markAsRead($userId, $notificationId);
+            } catch (Throwable $e) {
+                flash_error('Bildirim açılırken bir hata oluştu.');
+                redirect('consumer/notifications.php');
+            }
+        }
+
+        redirect($target);
     }
+
+    if ($action === 'read') {
+        $notificationId = (int) ($_POST['notification_id'] ?? 0);
+
+        if ($notificationId <= 0) {
+            flash_error('Geçerli bir bildirim bulunamadı.');
+            redirect('consumer/notifications.php');
+        }
+
+        try {
+            Notification::markAsRead($userId, $notificationId);
+            flash_success('Bildirim okundu olarak işaretlendi.');
+        } catch (Throwable $e) {
+            flash_error('Bildirim güncellenirken bir hata oluştu.');
+        }
+
+        redirect('consumer/notifications.php');
+    }
+
+    if ($action === 'read_all') {
+        try {
+            Notification::markAllAsRead($userId);
+            flash_success('Tüm bildirimler okundu olarak işaretlendi.');
+        } catch (Throwable $e) {
+            flash_error('Bildirimler güncellenirken bir hata oluştu.');
+        }
+
+        redirect('consumer/notifications.php');
+    }
+
+    redirect('consumer/notifications.php');
 }
 
 try {
-    $basketStatement = db()->prepare("
-        SELECT
-            nb.id,
-            nb.offer_id,
-            nb.basket_type,
-            nb.visibility,
-            nb.producer_id,
-            nb.product_id,
-            nb.creator_user_id,
-            nb.title,
-            nb.creator_note,
-            nb.province_id,
-            nb.district_id,
-            nb.neighborhood_id,
-            nb.target_quantity,
-            nb.current_quantity,
-            nb.unit_type,
-            nb.status,
-            nb.producer_status,
-            nb.discount_percent_snapshot,
-            nb.unit_price_snapshot,
-            nb.discounted_unit_price_snapshot,
-            nb.expires_at,
-            nb.order_id,
-            nb.created_at,
-            nb.updated_at,
-
-            p.title AS product_title,
-            p.price AS product_price,
-            p.stock_quantity,
-
-            creator.full_name AS creator_name,
-            producer.full_name AS producer_full_name,
-            COALESCE(pp.store_name, producer.full_name) AS producer_name,
-
-            pr.name AS province_name,
-            d.name AS district_name,
-            n.name AS neighborhood_name,
-
-            nbm.id AS member_id,
-            nbm.quantity AS my_quantity,
-            nbm.status AS my_member_status,
-
-            (
-                SELECT COUNT(*)
-                FROM neighborhood_basket_members nbm_count
-                WHERE nbm_count.basket_id = nb.id
-                  AND nbm_count.status IN ('active', 'paid')
-            ) AS member_count
-
-        FROM neighborhood_baskets nb
-        INNER JOIN products p ON p.id = nb.product_id
-        INNER JOIN users creator ON creator.id = nb.creator_user_id
-        INNER JOIN users producer ON producer.id = nb.producer_id
-        LEFT JOIN producer_profiles pp ON pp.user_id = producer.id
-        LEFT JOIN provinces pr ON pr.id = nb.province_id
-        LEFT JOIN districts d ON d.id = nb.district_id
-        LEFT JOIN neighborhoods n ON n.id = nb.neighborhood_id
-        LEFT JOIN neighborhood_basket_members nbm
-            ON nbm.basket_id = nb.id
-           AND nbm.user_id = :member_user_id
-        WHERE nb.creator_user_id = :creator_user_id
-           OR nbm.id IS NOT NULL
-        ORDER BY
-            CASE nb.status
-                WHEN 'ready_to_order' THEN 1
-                WHEN 'open' THEN 2
-                WHEN 'ordered' THEN 3
-                WHEN 'cancelled' THEN 4
-                WHEN 'expired' THEN 5
-                ELSE 6
-            END,
-            COALESCE(nb.updated_at, nb.created_at) DESC
-    ");
-
-    $basketStatement->execute([
-        'member_user_id' => $userId,
-        'creator_user_id' => $userId,
-    ]);
-
-    $myBaskets = $basketStatement->fetchAll(PDO::FETCH_ASSOC);
+    $notifications = Notification::getByUserId($userId, 100);
+    $unreadCount = Notification::unreadCount($userId);
 } catch (Throwable $e) {
-    $myBaskets = [];
+    $notifications = [];
+    $unreadCount = 0;
+    flash_error('Bildirimler yüklenirken bir hata oluştu.');
 }
 
-try {
-    $invitationStatement = db()->prepare("
-        SELECT
-            nbi.id AS invitation_id,
-            nbi.basket_id,
-            nbi.invited_email,
-            nbi.invited_user_id,
-            nbi.token,
-            nbi.status AS invitation_status,
-            nbi.expires_at AS invitation_expires_at,
-            nbi.created_at AS invitation_created_at,
+$totalCount = count($notifications);
+$readCount = max(0, $totalCount - $unreadCount);
 
-            nb.title AS basket_title,
-            nb.target_quantity,
-            nb.current_quantity,
-            nb.unit_type,
-            nb.status AS basket_status,
-            nb.discount_percent_snapshot,
-            nb.unit_price_snapshot,
-            nb.discounted_unit_price_snapshot,
-            nb.expires_at AS basket_expires_at,
+$filter = $_GET['filter'] ?? 'all';
 
-            p.title AS product_title,
-
-            creator.full_name AS creator_name,
-            COALESCE(pp.store_name, producer.full_name) AS producer_name,
-
-            pr.name AS province_name,
-            d.name AS district_name
-
-        FROM neighborhood_basket_invitations nbi
-        INNER JOIN neighborhood_baskets nb ON nb.id = nbi.basket_id
-        INNER JOIN products p ON p.id = nb.product_id
-        INNER JOIN users creator ON creator.id = nb.creator_user_id
-        INNER JOIN users producer ON producer.id = nb.producer_id
-        LEFT JOIN producer_profiles pp ON pp.user_id = producer.id
-        LEFT JOIN provinces pr ON pr.id = nb.province_id
-        LEFT JOIN districts d ON d.id = nb.district_id
-        WHERE nbi.status = 'pending'
-          AND (
-                nbi.invited_user_id = :invited_user_id
-                OR LOWER(nbi.invited_email) = :invited_email
-          )
-          AND (nbi.expires_at IS NULL OR nbi.expires_at >= NOW())
-        ORDER BY nbi.created_at DESC
-    ");
-
-    $invitationStatement->execute([
-        'invited_user_id' => $userId,
-        'invited_email' => $userEmail,
-    ]);
-
-    $pendingInvitations = $invitationStatement->fetchAll(PDO::FETCH_ASSOC);
-} catch (Throwable $e) {
-    $pendingInvitations = [];
+if (!in_array($filter, ['all', 'unread', 'read'], true)) {
+    $filter = 'all';
 }
 
-$stats['total'] = count($myBaskets);
-$stats['pending_invites'] = count($pendingInvitations);
+$visibleNotifications = array_values(array_filter($notifications, function (array $notification) use ($filter): bool {
+    $isRead = (int) ($notification['is_read'] ?? 0) === 1;
 
-foreach ($myBaskets as $basket) {
-    if ((int) $basket['creator_user_id'] === $userId) {
-        $stats['created']++;
-    } else {
-        $stats['joined']++;
-    }
-
-    if (($basket['status'] ?? '') === 'ready_to_order') {
-        $stats['ready']++;
-    }
-}
+    return match ($filter) {
+        'unread' => !$isRead,
+        'read' => $isRead,
+        default => true,
+    };
+}));
 
 require APP_PATH . '/Views/layouts/header.php';
-
 ?>
 
-<main class="consumer-neighborhood-page">
-
-    <section class="consumer-neighborhood-hero">
-        <div class="container consumer-neighborhood-hero-inner">
-
-            <div class="hero-copy">
-                <a class="back-link" href="<?= e(url('consumer/dashboard.php')) ?>">
-                    ← Tüketici paneline dön
-                </a>
-
-                <span class="mini-title">Mahalle Sepetlerim</span>
-
-                <h1>Katıldığın ve oluşturduğun toplu alımları takip et.</h1>
-
-                <p>
-                    Mahalle Sepetlerinde toplam miktarı, hedefe ne kadar kaldığını,
-                    kendi talep miktarını, tahmini ödemen gereken tutarı ve davetlerini buradan görebilirsin.
-                </p>
-
-                <div class="hero-actions">
-                    <a class="primary-btn" href="<?= e(url('neighborhood-baskets.php')) ?>">
-                        Aktif İlanları Gör
-                    </a>
-
-                    <a class="secondary-btn" href="<?= e(url('neighborhood-baskets.php?action=create')) ?>">
-                        Mahalle Sepeti Oluştur
-                    </a>
-                </div>
-            </div>
-
-            <div class="hero-stats-grid">
-                <article>
-                    <span>🧺</span>
-                    <strong><?= e((string) $stats['total']) ?></strong>
-                    <p>Aktif / geçmiş sepet</p>
-                </article>
-
-                <article>
-                    <span>✨</span>
-                    <strong><?= e((string) $stats['created']) ?></strong>
-                    <p>Oluşturduğun</p>
-                </article>
-
-                <article>
-                    <span>👥</span>
-                    <strong><?= e((string) $stats['joined']) ?></strong>
-                    <p>Katıldığın</p>
-                </article>
-
-                <article>
-                    <span>📩</span>
-                    <strong><?= e((string) $stats['pending_invites']) ?></strong>
-                    <p>Bekleyen davet</p>
-                </article>
-            </div>
-
-        </div>
-    </section>
-
-    <section class="consumer-neighborhood-content">
-        <div class="container">
-
-            <?php if ($pendingInvitations): ?>
-                <section class="pending-invites-section">
-                    <div class="section-heading">
-                        <div>
-                            <span>Bekleyen davetler</span>
-                            <h2>Katılmanı bekleyen Mahalle Sepetleri</h2>
-                        </div>
-
-                        <strong><?= e((string) count($pendingInvitations)) ?> davet</strong>
-                    </div>
-
-                    <div class="pending-invite-grid">
-                        <?php foreach ($pendingInvitations as $invitation): ?>
-                            <?php
-                                $targetQuantity = (float) ($invitation['target_quantity'] ?? 0);
-                                $currentQuantity = (float) ($invitation['current_quantity'] ?? 0);
-                                $progressPercent = $targetQuantity > 0
-                                    ? min(100, round(($currentQuantity / $targetQuantity) * 100))
-                                    : 0;
-
-                                $locationParts = array_filter([
-                                    $invitation['province_name'] ?? null,
-                                    $invitation['district_name'] ?? null,
-                                ]);
-
-                                $locationText = $locationParts ? implode(' / ', $locationParts) : 'Konum belirtilmemiş';
-                            ?>
-
-                            <article class="pending-invite-card">
-                                <div class="card-top">
-                                    <span class="card-icon">📩</span>
-
-                                    <div>
-                                        <h3><?= e($invitation['basket_title']) ?></h3>
-                                        <p>
-                                            <?= e($invitation['creator_name'] ?? 'Bir kullanıcı') ?>
-                                            seni davet etti.
-                                        </p>
-                                    </div>
-                                </div>
-
-                                <div class="mini-info-list">
-                                    <div>
-                                        <span>Ürün</span>
-                                        <strong><?= e($invitation['product_title']) ?></strong>
-                                    </div>
-
-                                    <div>
-                                        <span>Üretici</span>
-                                        <strong><?= e($invitation['producer_name'] ?? 'Üretici') ?></strong>
-                                    </div>
-
-                                    <div>
-                                        <span>Konum</span>
-                                        <strong><?= e($locationText) ?></strong>
-                                    </div>
-
-                                    <div>
-                                        <span>İndirim</span>
-                                        <strong>%<?= e(number_format((float) $invitation['discount_percent_snapshot'], 2, ',', '.')) ?></strong>
-                                    </div>
-                                </div>
-
-                                <div class="progress-box">
-                                    <div>
-                                        <span>Toplanan</span>
-                                        <strong>
-                                            <?= e(consumer_nb_quantity($currentQuantity)) ?>
-                                            /
-                                            <?= e(consumer_nb_quantity($targetQuantity)) ?>
-                                            <?= e($invitation['unit_type']) ?>
-                                        </strong>
-                                    </div>
-
-                                    <div class="progress-bar">
-                                        <span style="width: <?= e((string) $progressPercent) ?>%;"></span>
-                                    </div>
-                                </div>
-
-                                <a
-                                    class="primary-btn full"
-                                    href="<?= e(url('neighborhood-baskets.php?action=accept-invite&token=' . $invitation['token'])) ?>"
-                                >
-                                    Daveti Gör ve Katıl
-                                </a>
-                            </article>
-                        <?php endforeach; ?>
-                    </div>
-                </section>
-            <?php endif; ?>
-
-            <section class="my-baskets-section">
-                <div class="section-heading">
-                    <div>
-                        <span>Sepetlerim</span>
-                        <h2>Oluşturduğun ve katıldığın Mahalle Sepetleri</h2>
-                    </div>
-
-                    <strong><?= e((string) count($myBaskets)) ?> sepet</strong>
-                </div>
-
-                <?php if (!$myBaskets): ?>
-                    <div class="empty-state">
-                        <span>🧺</span>
-                        <h3>Henüz katıldığın Mahalle Sepeti yok</h3>
-                        <p>
-                            Üreticilerin toplu alım ilanlarını inceleyerek bir Mahalle Sepeti başlatabilir
-                            veya sana gelen davetleri kabul ederek bir sepete katılabilirsin.
-                        </p>
-
-                        <a class="primary-btn" href="<?= e(url('neighborhood-baskets.php')) ?>">
-                            Aktif Toplu Alım İlanlarını Gör
-                        </a>
-                    </div>
-                <?php else: ?>
-                    <div class="basket-grid">
-                        <?php foreach ($myBaskets as $basket): ?>
-                            <?php
-                                $targetQuantity = (float) ($basket['target_quantity'] ?? 0);
-                                $currentQuantity = (float) ($basket['current_quantity'] ?? 0);
-                                $progressPercent = $targetQuantity > 0
-                                    ? min(100, round(($currentQuantity / $targetQuantity) * 100))
-                                    : 0;
-
-                                $discountedUnitPrice = (float) ($basket['discounted_unit_price_snapshot'] ?? 0);
-                                $myQuantity = (float) ($basket['my_quantity'] ?? 0);
-                                $myEstimatedTotal = $myQuantity * $discountedUnitPrice;
-
-                                $isCreator = (int) $basket['creator_user_id'] === $userId;
-                                $roleLabel = $isCreator ? 'Oluşturdun' : 'Katıldın';
-
-                                $locationParts = array_filter([
-                                    $basket['province_name'] ?? null,
-                                    $basket['district_name'] ?? null,
-                                    $basket['neighborhood_name'] ?? null,
-                                ]);
-
-                                $locationText = $locationParts ? implode(' / ', $locationParts) : 'Konum belirtilmemiş';
-                                $status = (string) ($basket['status'] ?? 'open');
-                            ?>
-
-                            <article class="basket-card">
-                                <div class="basket-card-header">
-                                    <div class="card-top">
-                                        <span class="card-icon">🧺</span>
-
-                                        <div>
-                                            <h3><?= e($basket['title']) ?></h3>
-                                            <p>
-                                                <?= e($basket['producer_name'] ?? 'Üretici') ?>
-                                                ·
-                                                <?= e($locationText) ?>
-                                            </p>
-                                        </div>
-                                    </div>
-
-                                    <div class="badge-row">
-                                        <span class="role-badge">
-                                            <?= e($roleLabel) ?>
-                                        </span>
-
-                                        <span class="status-badge <?= e(consumer_nb_status_class($status)) ?>">
-                                            <?= e(consumer_nb_status_label($status)) ?>
-                                        </span>
-                                    </div>
-                                </div>
-
-                                <div class="basket-product-box">
-                                    <span>Ürün</span>
-                                    <strong><?= e($basket['product_title']) ?></strong>
-                                </div>
-
-                                <div class="progress-box">
-                                    <div>
-                                        <span>Toplanan miktar</span>
-                                        <strong>
-                                            <?= e(consumer_nb_quantity($currentQuantity)) ?>
-                                            /
-                                            <?= e(consumer_nb_quantity($targetQuantity)) ?>
-                                            <?= e($basket['unit_type']) ?>
-                                        </strong>
-                                    </div>
-
-                                    <div class="progress-bar">
-                                        <span style="width: <?= e((string) $progressPercent) ?>%;"></span>
-                                    </div>
-
-                                    <small>
-                                        Hedefin %<?= e((string) $progressPercent) ?> kadarı tamamlandı.
-                                    </small>
-                                </div>
-
-                                <div class="basket-info-grid">
-                                    <div>
-                                        <span>Benim miktarım</span>
-                                        <strong>
-                                            <?php if ($myQuantity > 0): ?>
-                                                <?= e(consumer_nb_quantity($myQuantity)) ?>
-                                                <?= e($basket['unit_type']) ?>
-                                            <?php elseif ($isCreator): ?>
-                                                Oluşturan
-                                            <?php else: ?>
-                                                -
-                                            <?php endif; ?>
-                                        </strong>
-                                    </div>
-
-                                    <div>
-                                        <span>Tahmini ödemem</span>
-                                        <strong>
-                                            <?= $myEstimatedTotal > 0 ? e(consumer_nb_money($myEstimatedTotal)) : '-' ?>
-                                        </strong>
-                                    </div>
-
-                                    <div>
-                                        <span>İndirim</span>
-                                        <strong>
-                                            %<?= e(number_format((float) $basket['discount_percent_snapshot'], 2, ',', '.')) ?>
-                                        </strong>
-                                    </div>
-
-                                    <div>
-                                        <span>Katılımcı</span>
-                                        <strong>
-                                            <?= e((string) ($basket['member_count'] ?? 0)) ?> kişi
-                                        </strong>
-                                    </div>
-                                </div>
-
-                                <?php if ($isCreator && $status === 'ready_to_order'): ?>
-                                    <div class="ready-alert">
-                                        <span>✅</span>
-                                        <p>
-                                            Bu sepet hedef miktara ulaştı. Detay sayfasından toplu siparişi onaylayabilirsin.
-                                        </p>
-                                    </div>
-                                <?php endif; ?>
-
-                                <div class="basket-actions">
-                                    <a
-                                        class="primary-btn full"
-                                        href="<?= e(url('neighborhood-baskets.php?action=show&id=' . $basket['id'])) ?>"
-                                    >
-                                        Detayı Gör
-                                    </a>
-                                </div>
-                            </article>
-                        <?php endforeach; ?>
-                    </div>
-                <?php endif; ?>
-            </section>
-
-        </div>
-    </section>
-
-</main>
-
 <style>
-    .consumer-neighborhood-page {
-        min-height: calc(100vh - 90px);
-        background:
-            radial-gradient(circle at top left, rgba(150, 210, 153, 0.30), transparent 34%),
-            linear-gradient(135deg, #f8fcf5 0%, #eef8ec 100%);
-        color: #263326;
-        padding-bottom: 58px;
+    .notifications-page {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 28px 16px 48px;
     }
 
-    .consumer-neighborhood-hero {
-        padding: 38px 0 24px;
+    .notifications-hero {
+        background: linear-gradient(135deg, #f0fdf4, #ecfeff);
+        border: 1px solid #d1fae5;
+        border-radius: 24px;
+        padding: 28px;
+        margin-bottom: 22px;
+        box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
     }
 
-    .consumer-neighborhood-hero-inner {
-        display: grid;
-        grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.75fr);
-        gap: 24px;
+    .notifications-breadcrumb {
+        display: flex;
+        gap: 8px;
         align-items: center;
-    }
-
-    .back-link {
-        display: inline-flex;
-        margin-bottom: 16px;
-        color: #3f8f46;
-        text-decoration: none;
-        font-weight: 900;
-    }
-
-    .back-link:hover {
-        color: #245c2f;
-    }
-
-    .mini-title {
-        display: inline-flex;
-        padding: 8px 15px;
-        border-radius: 999px;
-        background: #eef8ec;
-        color: #3f8f46;
-        font-size: 13px;
-        font-weight: 950;
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
+        color: #64748b;
+        font-size: 14px;
         margin-bottom: 14px;
     }
 
-    .hero-copy h1 {
-        max-width: 820px;
+    .notifications-breadcrumb a {
+        color: #047857;
+        text-decoration: none;
+        font-weight: 700;
+    }
+
+    .notifications-hero h1 {
+        margin: 0 0 10px;
+        color: #0f172a;
+        font-size: clamp(28px, 4vw, 42px);
+        line-height: 1.08;
+    }
+
+    .notifications-hero p {
         margin: 0;
-        color: #245c2f;
-        font-size: clamp(34px, 5vw, 54px);
-        line-height: 1.06;
-        letter-spacing: -0.055em;
-        font-weight: 950;
+        max-width: 720px;
+        color: #475569;
+        font-size: 16px;
+        line-height: 1.65;
     }
 
-    .hero-copy p {
-        max-width: 820px;
-        margin: 18px 0 0;
-        color: #647064;
-        font-size: 18px;
-        line-height: 1.7;
-    }
-
-    .hero-actions {
+    .notifications-actions {
         display: flex;
         flex-wrap: wrap;
-        gap: 12px;
-        margin-top: 24px;
+        gap: 10px;
+        margin-top: 20px;
     }
 
-    .primary-btn,
-    .secondary-btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-height: 46px;
-        padding: 0 20px;
+    .notifications-btn {
+        border: 0;
         border-radius: 999px;
-        text-decoration: none;
-        font-weight: 950;
-        border: none;
+        padding: 11px 16px;
+        font-weight: 800;
         cursor: pointer;
-        transition: 0.22s ease;
-        text-align: center;
-    }
-
-    .primary-btn {
-        background: #245c2f;
-        color: #ffffff;
-        box-shadow: 0 14px 28px rgba(36, 92, 47, 0.20);
-    }
-
-    .primary-btn:hover {
-        background: #1d4b27;
-        transform: translateY(-2px);
-    }
-
-    .secondary-btn {
-        background: #ffffff;
-        color: #245c2f;
-        border: 1px solid #d9ead3;
-    }
-
-    .secondary-btn:hover {
-        background: #eef8ec;
-        transform: translateY(-2px);
-    }
-
-    .full {
-        width: 100%;
-    }
-
-    .hero-stats-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 14px;
-    }
-
-    .hero-stats-grid article,
-    .pending-invite-card,
-    .basket-card,
-    .empty-state {
-        border-radius: 28px;
-        background: rgba(255, 255, 255, 0.92);
-        border: 1px solid rgba(205, 229, 199, 0.95);
-        box-shadow: 0 18px 45px rgba(36, 92, 47, 0.10);
-    }
-
-    .hero-stats-grid article {
-        padding: 20px;
-    }
-
-    .hero-stats-grid span {
+        text-decoration: none;
         display: inline-flex;
-        width: 46px;
-        height: 46px;
         align-items: center;
         justify-content: center;
-        border-radius: 17px;
-        background: #eef8ec;
-        font-size: 22px;
-        margin-bottom: 12px;
+        gap: 8px;
+        transition: transform .15s ease, box-shadow .15s ease;
     }
 
-    .hero-stats-grid strong {
+    .notifications-btn:hover {
+        transform: translateY(-1px);
+    }
+
+    .notifications-btn-primary {
+        background: #047857;
+        color: #fff;
+        box-shadow: 0 10px 22px rgba(4, 120, 87, .22);
+    }
+
+    .notifications-btn-soft {
+        background: #ffffff;
+        color: #047857;
+        border: 1px solid #bbf7d0;
+    }
+
+    .notifications-btn-muted {
+        background: #f8fafc;
+        color: #334155;
+        border: 1px solid #e2e8f0;
+    }
+
+    .notifications-stats {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+        margin-bottom: 20px;
+    }
+
+    .notifications-stat-card {
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 20px;
+        padding: 18px;
+        box-shadow: 0 12px 28px rgba(15, 23, 42, .06);
+    }
+
+    .notifications-stat-card span {
         display: block;
-        color: #245c2f;
+        color: #64748b;
+        font-size: 13px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+    }
+
+    .notifications-stat-card strong {
+        display: block;
+        margin-top: 8px;
+        color: #0f172a;
         font-size: 30px;
         line-height: 1;
-        margin-bottom: 6px;
     }
 
-    .hero-stats-grid p {
-        margin: 0;
-        color: #647064;
-        font-weight: 850;
-    }
-
-    .consumer-neighborhood-content {
-        padding-top: 14px;
-    }
-
-    .pending-invites-section,
-    .my-baskets-section {
-        margin-top: 22px;
-    }
-
-    .section-heading {
+    .notifications-filter-bar {
         display: flex;
-        align-items: flex-end;
+        flex-wrap: wrap;
         justify-content: space-between;
-        gap: 18px;
-        margin-bottom: 18px;
-    }
-
-    .section-heading span {
-        display: block;
-        color: #3f8f46;
-        font-size: 13px;
-        font-weight: 950;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        margin-bottom: 6px;
-    }
-
-    .section-heading h2 {
-        margin: 0;
-        color: #245c2f;
-        font-size: clamp(26px, 4vw, 38px);
-        line-height: 1.13;
-        letter-spacing: -0.04em;
-    }
-
-    .section-heading > strong {
-        display: inline-flex;
-        padding: 9px 14px;
-        border-radius: 999px;
-        background: #eef8ec;
-        color: #245c2f;
-        font-size: 13px;
-        font-weight: 950;
-        white-space: nowrap;
-    }
-
-    .pending-invite-grid,
-    .basket-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(310px, 1fr));
-        gap: 18px;
-    }
-
-    .pending-invite-card,
-    .basket-card {
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-        padding: 22px;
-    }
-
-    .card-top {
-        display: flex;
-        align-items: flex-start;
-        gap: 14px;
-    }
-
-    .card-icon {
-        width: 48px;
-        height: 48px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 18px;
-        background: #eef8ec;
-        font-size: 24px;
-        flex: 0 0 auto;
-    }
-
-    .card-top h3 {
-        margin: 0 0 6px;
-        color: #245c2f;
-        font-size: 22px;
-        line-height: 1.2;
-    }
-
-    .card-top p {
-        margin: 0;
-        color: #647064;
-        line-height: 1.55;
-    }
-
-    .basket-card-header {
-        display: grid;
         gap: 12px;
+        align-items: center;
+        margin-bottom: 16px;
     }
 
-    .badge-row {
+    .notifications-tabs {
         display: flex;
         flex-wrap: wrap;
         gap: 8px;
     }
 
-    .role-badge,
-    .status-badge {
-        display: inline-flex;
-        padding: 7px 11px;
+    .notifications-tab {
+        text-decoration: none;
         border-radius: 999px;
-        font-size: 12px;
-        font-weight: 950;
+        padding: 10px 14px;
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        color: #475569;
+        font-weight: 800;
     }
 
-    .role-badge {
-        background: #eef8ec;
-        color: #245c2f;
+    .notifications-tab.is-active {
+        background: #064e3b;
+        color: #fff;
+        border-color: #064e3b;
     }
 
-    .status-open {
-        background: #e8f1ff;
-        color: #1f4e8c;
-    }
-
-    .status-ready {
-        background: #fff5d6;
-        color: #8a6200;
-    }
-
-    .status-ordered {
-        background: #e7f7e8;
-        color: #236b2c;
-    }
-
-    .status-cancelled,
-    .status-expired {
-        background: #fff1f1;
-        color: #9b3434;
-    }
-
-    .mini-info-list,
-    .basket-info-grid {
+    .notifications-list {
         display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 10px;
-    }
-
-    .mini-info-list div,
-    .basket-info-grid div,
-    .basket-product-box {
-        padding: 13px;
-        border-radius: 17px;
-        background: #f8fcf5;
-        border: 1px solid #d9ead3;
-    }
-
-    .mini-info-list span,
-    .basket-info-grid span,
-    .basket-product-box span,
-    .progress-box span {
-        display: block;
-        color: #7b887b;
-        font-size: 12px;
-        font-weight: 950;
-        margin-bottom: 5px;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-    }
-
-    .mini-info-list strong,
-    .basket-info-grid strong,
-    .basket-product-box strong,
-    .progress-box strong {
-        display: block;
-        color: #245c2f;
-        font-size: 15px;
-    }
-
-    .progress-box {
-        display: grid;
-        gap: 9px;
-    }
-
-    .progress-bar {
-        width: 100%;
-        height: 13px;
-        border-radius: 999px;
-        background: #dcefd7;
-        overflow: hidden;
-    }
-
-    .progress-bar span {
-        display: block;
-        height: 100%;
-        border-radius: inherit;
-        background: linear-gradient(90deg, #3f8f46, #8bcf83);
-    }
-
-    .progress-box small {
-        color: #647064;
-        font-weight: 750;
-    }
-
-    .ready-alert {
-        display: flex;
         gap: 12px;
-        align-items: flex-start;
-        padding: 14px;
-        border-radius: 18px;
-        background: #fff5d6;
-        border: 1px solid #f3df99;
-        color: #745200;
     }
 
-    .ready-alert span {
-        flex: 0 0 auto;
+    .notification-card {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        gap: 14px;
+        align-items: flex-start;
+        background: #fff;
+        border: 1px solid #e2e8f0;
+        border-radius: 22px;
+        padding: 18px;
+        box-shadow: 0 12px 28px rgba(15, 23, 42, .055);
+    }
+
+    .notification-card.is-unread {
+        border-color: #86efac;
+        background: #f7fee7;
+    }
+
+    .notification-icon {
+        width: 46px;
+        height: 46px;
+        border-radius: 16px;
+        background: #ecfdf5;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         font-size: 22px;
     }
 
-    .ready-alert p {
-        margin: 0;
+    .notification-content h3 {
+        margin: 0 0 7px;
+        color: #0f172a;
+        font-size: 18px;
+    }
+
+    .notification-content p {
+        margin: 0 0 12px;
+        color: #475569;
         line-height: 1.55;
-        font-weight: 850;
     }
 
-    .basket-actions {
-        margin-top: auto;
+    .notification-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        color: #64748b;
+        font-size: 13px;
     }
 
-    .empty-state {
-        max-width: 760px;
-        margin: 0 auto;
-        padding: 34px 24px;
+    .notification-badge {
+        border-radius: 999px;
+        padding: 5px 9px;
+        background: #f1f5f9;
+        color: #334155;
+        font-weight: 800;
+    }
+
+    .notification-badge-unread {
+        background: #dcfce7;
+        color: #166534;
+    }
+
+    .notification-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 132px;
+    }
+
+    .notification-actions form {
+        margin: 0;
+    }
+
+    .notification-actions .notifications-btn {
+        width: 100%;
+        font-size: 13px;
+        padding: 9px 12px;
+    }
+
+    .notifications-empty {
+        background: #fff;
+        border: 1px dashed #cbd5e1;
+        border-radius: 24px;
+        padding: 34px;
         text-align: center;
+        color: #475569;
     }
 
-    .empty-state > span {
-        font-size: 44px;
-    }
-
-    .empty-state h3 {
-        margin: 12px 0 8px;
-        color: #245c2f;
-        font-size: 26px;
-    }
-
-    .empty-state p {
-        max-width: 560px;
-        margin: 0 auto 18px;
-        color: #647064;
-        line-height: 1.65;
-    }
-
-    @media (max-width: 980px) {
-        .consumer-neighborhood-hero-inner {
-            grid-template-columns: 1fr;
-        }
-
-        .hero-stats-grid {
-            grid-template-columns: repeat(4, minmax(0, 1fr));
-        }
+    .notifications-empty strong {
+        display: block;
+        color: #0f172a;
+        font-size: 20px;
+        margin-bottom: 8px;
     }
 
     @media (max-width: 760px) {
-        .hero-stats-grid,
-        .pending-invite-grid,
-        .basket-grid {
+        .notifications-stats {
             grid-template-columns: 1fr;
         }
 
-        .section-heading {
-            align-items: flex-start;
-            flex-direction: column;
+        .notification-card {
+            grid-template-columns: 1fr;
         }
 
-        .hero-actions {
-            align-items: stretch;
-            flex-direction: column;
-        }
-
-        .primary-btn,
-        .secondary-btn {
+        .notification-actions {
             width: 100%;
-        }
-
-        .pending-invite-card,
-        .basket-card,
-        .empty-state {
-            padding: 20px;
-            border-radius: 22px;
-        }
-    }
-
-    @media (max-width: 560px) {
-        .mini-info-list,
-        .basket-info-grid {
-            grid-template-columns: 1fr;
-        }
-
-        .hero-copy h1 {
-            font-size: clamp(30px, 9vw, 42px);
-        }
-
-        .hero-copy p {
-            font-size: 16px;
         }
     }
 </style>
+
+<main class="notifications-page">
+    <section class="notifications-hero">
+        <div class="notifications-breadcrumb">
+            <a href="<?= e(url('index.php')) ?>">Ana Sayfa</a>
+            <span>/</span>
+            <a href="<?= e(url('consumer/dashboard.php')) ?>">Tüketici Paneli</a>
+            <span>/</span>
+            <span>Bildirimlerim</span>
+        </div>
+
+        <h1>Bildirimlerim</h1>
+        <p>
+            Sipariş durumları, ödeme hareketleri, ürün soruları, üretici güncellemeleri ve sistem bildirimlerini buradan takip edebilirsin.
+        </p>
+
+        <div class="notifications-actions">
+            <a class="notifications-btn notifications-btn-primary" href="<?= e(url('consumer/dashboard.php')) ?>">
+                ← Panele Dön
+            </a>
+
+            <a class="notifications-btn notifications-btn-soft" href="<?= e(url('consumer/orders.php')) ?>">
+                Siparişlerim
+            </a>
+
+            <a class="notifications-btn notifications-btn-soft" href="<?= e(url('consumer/wallet.php')) ?>">
+                Sanal Bakiye
+            </a>
+        </div>
+    </section>
+
+    <section class="notifications-stats">
+        <div class="notifications-stat-card">
+            <span>Toplam bildirim</span>
+            <strong><?= e((string) $totalCount) ?></strong>
+        </div>
+
+        <div class="notifications-stat-card">
+            <span>Okunmamış</span>
+            <strong><?= e((string) $unreadCount) ?></strong>
+        </div>
+
+        <div class="notifications-stat-card">
+            <span>Okunmuş</span>
+            <strong><?= e((string) $readCount) ?></strong>
+        </div>
+    </section>
+
+    <section class="notifications-filter-bar">
+        <div class="notifications-tabs">
+            <a class="notifications-tab<?= $filter === 'all' ? ' is-active' : '' ?>" href="<?= e(url('consumer/notifications.php?filter=all')) ?>">
+                Tümü
+            </a>
+
+            <a class="notifications-tab<?= $filter === 'unread' ? ' is-active' : '' ?>" href="<?= e(url('consumer/notifications.php?filter=unread')) ?>">
+                Okunmamış
+            </a>
+
+            <a class="notifications-tab<?= $filter === 'read' ? ' is-active' : '' ?>" href="<?= e(url('consumer/notifications.php?filter=read')) ?>">
+                Okunmuş
+            </a>
+        </div>
+
+        <?php if ($unreadCount > 0): ?>
+            <form method="post" action="<?= e(url('consumer/notifications.php')) ?>">
+                <?= csrf_field() ?>
+                <input type="hidden" name="_action" value="read_all">
+                <button class="notifications-btn notifications-btn-primary" type="submit">
+                    Tümünü Okundu Yap
+                </button>
+            </form>
+        <?php endif; ?>
+    </section>
+
+    <?php if (!$visibleNotifications): ?>
+        <section class="notifications-empty">
+            <strong>Gösterilecek bildirim yok.</strong>
+            <span>
+                <?= $filter === 'all'
+                    ? 'Henüz hesabına ait bir bildirim oluşmamış.'
+                    : 'Bu filtreye uygun bildirim bulunamadı.' ?>
+            </span>
+        </section>
+    <?php else: ?>
+        <section class="notifications-list">
+            <?php foreach ($visibleNotifications as $notification): ?>
+                <?php
+                    $notificationId = (int) ($notification['id'] ?? 0);
+                    $type = (string) ($notification['type'] ?? 'system');
+                    $title = (string) ($notification['title'] ?? 'Bildirim');
+                    $message = (string) ($notification['message'] ?? '');
+                    $createdAt = (string) ($notification['created_at'] ?? '');
+                    $isRead = (int) ($notification['is_read'] ?? 0) === 1;
+                    $target = consumer_notification_target($notification);
+                ?>
+
+                <article class="notification-card<?= $isRead ? '' : ' is-unread' ?>">
+                    <div class="notification-icon">
+                        <?= e(consumer_notification_icon($type)) ?>
+                    </div>
+
+                    <div class="notification-content">
+                        <h3><?= e($title) ?></h3>
+
+                        <p><?= e($message) ?></p>
+
+                        <div class="notification-meta">
+                            <span class="notification-badge">
+                                <?= e(consumer_notification_type_label($type)) ?>
+                            </span>
+
+                            <span class="notification-badge">
+                                <?= e(consumer_notification_date($createdAt)) ?>
+                            </span>
+
+                            <?php if (!$isRead): ?>
+                                <span class="notification-badge notification-badge-unread">
+                                    Yeni
+                                </span>
+                            <?php else: ?>
+                                <span class="notification-badge">
+                                    Okundu
+                                </span>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+
+                    <div class="notification-actions">
+                        <form method="post" action="<?= e(url('consumer/notifications.php')) ?>">
+                            <?= csrf_field() ?>
+                            <input type="hidden" name="_action" value="open">
+                            <input type="hidden" name="notification_id" value="<?= e((string) $notificationId) ?>">
+                            <input type="hidden" name="target" value="<?= e($target) ?>">
+                            <button class="notifications-btn notifications-btn-primary" type="submit">
+                                Aç
+                            </button>
+                        </form>
+
+                        <?php if (!$isRead): ?>
+                            <form method="post" action="<?= e(url('consumer/notifications.php')) ?>">
+                                <?= csrf_field() ?>
+                                <input type="hidden" name="_action" value="read">
+                                <input type="hidden" name="notification_id" value="<?= e((string) $notificationId) ?>">
+                                <button class="notifications-btn notifications-btn-muted" type="submit">
+                                    Okundu Yap
+                                </button>
+                            </form>
+                        <?php endif; ?>
+                    </div>
+                </article>
+            <?php endforeach; ?>
+        </section>
+    <?php endif; ?>
+</main>
 
 <?php require APP_PATH . '/Views/layouts/footer.php'; ?>
