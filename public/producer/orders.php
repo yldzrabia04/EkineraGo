@@ -142,6 +142,84 @@ if (!function_exists('producer_orders_payment_class')) {
     }
 }
 
+
+if (!function_exists('producer_orders_is_neighborhood')) {
+    function producer_orders_is_neighborhood(array $order): bool
+    {
+        return ($order['order_type'] ?? '') === 'neighborhood_basket'
+            || !empty($order['neighborhood_basket']);
+    }
+}
+
+if (!function_exists('producer_orders_type_label')) {
+    function producer_orders_type_label(array $order): string
+    {
+        return producer_orders_is_neighborhood($order)
+            ? 'Mahalle Sepeti'
+            : 'Normal Sipariş';
+    }
+}
+
+if (!function_exists('producer_orders_type_key')) {
+    function producer_orders_type_key(array $order): string
+    {
+        return producer_orders_is_neighborhood($order) ? 'neighborhood_basket' : 'normal';
+    }
+}
+
+if (!function_exists('producer_orders_enrich_neighborhood_baskets')) {
+    function producer_orders_enrich_neighborhood_baskets(array $orders): array
+    {
+        if (empty($orders)) {
+            return $orders;
+        }
+
+        $orderIds = [];
+
+        foreach ($orders as $order) {
+            $orderId = (int) ($order['id'] ?? 0);
+
+            if ($orderId > 0) {
+                $orderIds[$orderId] = $orderId;
+            }
+        }
+
+        if (!$orderIds) {
+            return $orders;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
+
+        try {
+            $statement = db()->prepare("\n                SELECT\n                    nb.order_id,\n                    nb.id AS basket_id,\n                    nb.title AS basket_title,\n                    nb.basket_type,\n                    nb.visibility,\n                    nb.target_quantity,\n                    nb.current_quantity,\n                    nb.unit_type,\n                    nb.status AS basket_status,\n                    nb.creator_user_id,\n                    nb.discount_percent_snapshot,\n                    nb.unit_price_snapshot,\n                    nb.discounted_unit_price_snapshot,\n                    creator.full_name AS basket_creator_name,\n                    creator.email AS basket_creator_email,\n                    nbo.title AS offer_title\n                FROM neighborhood_baskets nb\n                LEFT JOIN users creator ON creator.id = nb.creator_user_id\n                LEFT JOIN neighborhood_basket_offers nbo ON nbo.id = nb.offer_id\n                WHERE nb.order_id IN ($placeholders)\n            ");
+
+            $statement->execute(array_values($orderIds));
+            $basketRows = $statement->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            return $orders;
+        }
+
+        $basketsByOrderId = [];
+
+        foreach ($basketRows as $basketRow) {
+            $basketsByOrderId[(int) $basketRow['order_id']] = $basketRow;
+        }
+
+        foreach ($orders as &$order) {
+            $orderId = (int) ($order['id'] ?? 0);
+
+            if (isset($basketsByOrderId[$orderId])) {
+                $order['neighborhood_basket'] = $basketsByOrderId[$orderId];
+                $order['order_type'] = 'neighborhood_basket';
+            }
+        }
+
+        unset($order);
+
+        return $orders;
+    }
+}
+
 if (!function_exists('producer_orders_stats')) {
     function producer_orders_stats(array $orders): array
     {
@@ -156,12 +234,17 @@ if (!function_exists('producer_orders_stats')) {
             'delivered' => 0,
             'cancelled' => 0,
             'revenue' => 0,
+            'neighborhood' => 0,
         ];
 
         foreach ($orders as $order) {
             $status = (string) ($order['order_status'] ?? '');
 
             $stats['revenue'] += (float) ($order['total_amount'] ?? 0);
+
+            if (producer_orders_is_neighborhood($order)) {
+                $stats['neighborhood']++;
+            }
 
             if ($status === $delivered) {
                 $stats['delivered']++;
@@ -195,6 +278,7 @@ if (!function_exists('producer_orders_render_hero_stats')) {
             <span>📦 <?= e((string) $stats['total']) ?> sipariş</span>
             <span>🚚 <?= e((string) $stats['active']) ?> aktif</span>
             <span>✅ <?= e((string) $stats['delivered']) ?> teslim</span>
+            <span>🧺 <?= e((string) $stats['neighborhood']) ?> mahalle sepeti</span>
             <span>💰 <?= e(producer_orders_money((float) $stats['revenue'])) ?></span>
         </div>
         <?php
@@ -221,7 +305,7 @@ if (!function_exists('producer_orders_render_dynamic_area')) {
                 <h2>Henüz gelen sipariş yok.</h2>
 
                 <p>
-                    Ürünlerin satın alındığında siparişler bu sayfada listelenecek.
+                    Ürünlerin satın alındığında veya Mahalle Sepeti toplu siparişi üreticiye gönderildiğinde siparişler bu sayfada listelenecek.
                 </p>
 
                 <div class="empty-actions">
@@ -242,7 +326,7 @@ if (!function_exists('producer_orders_render_dynamic_area')) {
                     <h2>Gelen siparişler</h2>
 
                     <p>
-                        Tüketicilerden gelen siparişleri görüntüleyebilir ve sipariş durumlarını AJAX ile güncelleyebilirsin.
+                        Tüketicilerden gelen normal siparişleri ve Mahalle Sepeti toplu siparişlerini görüntüleyebilir, sipariş durumlarını AJAX ile güncelleyebilirsin.
                     </p>
                 </div>
 
@@ -268,6 +352,15 @@ if (!function_exists('producer_orders_render_dynamic_area')) {
                     <div>
                         <strong><?= e((string) $stats['active']) ?></strong>
                         <p>Aktif Sipariş</p>
+                    </div>
+                </article>
+
+                <article class="producer-order-stat-card glass-card">
+                    <span>🧺</span>
+
+                    <div>
+                        <strong><?= e((string) $stats['neighborhood']) ?></strong>
+                        <p>Mahalle Sepeti</p>
                     </div>
                 </article>
 
@@ -298,7 +391,7 @@ if (!function_exists('producer_orders_render_dynamic_area')) {
                         <input
                             type="search"
                             id="producer-order-search"
-                            placeholder="Sipariş no veya tüketici adı ara..."
+                            placeholder="Sipariş no, tüketici adı veya mahalle sepeti ara..."
                             autocomplete="off"
                         >
                     </div>
@@ -312,6 +405,12 @@ if (!function_exists('producer_orders_render_dynamic_area')) {
                             </option>
                         <?php endforeach; ?>
                     </select>
+
+                    <select id="producer-order-type-filter">
+                        <option value="">Tüm sipariş türleri</option>
+                        <option value="normal">Normal Sipariş</option>
+                        <option value="neighborhood_basket">Mahalle Sepeti</option>
+                    </select>
                 </div>
             </section>
 
@@ -320,6 +419,10 @@ if (!function_exists('producer_orders_render_dynamic_area')) {
                     <?php
                         $items = $order['items'] ?? [];
                         $shipment = $order['shipment'] ?? null;
+                        $neighborhoodBasket = $order['neighborhood_basket'] ?? null;
+                        $isNeighborhoodBasket = producer_orders_is_neighborhood($order);
+                        $orderTypeKey = producer_orders_type_key($order);
+                        $orderTypeLabel = producer_orders_type_label($order);
 
                         $orderStatus = (string) ($order['order_status'] ?? '');
                         $paymentStatus = (string) ($order['payment_status'] ?? '');
@@ -327,28 +430,31 @@ if (!function_exists('producer_orders_render_dynamic_area')) {
                         $orderId = (int) ($order['id'] ?? 0);
                         $orderNo = $order['order_no'] ?? 'Sipariş';
                         $consumerName = $order['consumer_name'] ?? 'Tüketici';
+                        $consumerLabel = $isNeighborhoodBasket ? 'Sepet sahibi' : 'Tüketici';
 
                         $trackingNo = $order['tracking_no']
                             ?? ($shipment['tracking_no'] ?? '-');
 
-                        $searchText = strtolower(trim($orderNo . ' ' . $consumerName));
+                        $basketSearchText = is_array($neighborhoodBasket) ? (($neighborhoodBasket['basket_title'] ?? '') . ' ' . ($neighborhoodBasket['offer_title'] ?? '')) : '';
+                        $searchText = strtolower(trim($orderNo . ' ' . $consumerName . ' ' . $orderTypeLabel . ' ' . $basketSearchText));
                     ?>
 
                     <article
-                        class="producer-order-card glass-card"
+                        class="producer-order-card glass-card <?= $isNeighborhoodBasket ? 'is-neighborhood-order' : '' ?>"
                         data-order-card="<?= e((string) $orderId) ?>"
                         data-status="<?= e($orderStatus) ?>"
+                        data-type="<?= e($orderTypeKey) ?>"
                         data-search="<?= e($searchText) ?>"
                     >
                         <div class="producer-order-header">
                             <div class="producer-order-title-area">
-                                <span class="producer-order-icon">📦</span>
+                                <span class="producer-order-icon"><?= $isNeighborhoodBasket ? '🧺' : '📦' ?></span>
 
                                 <div>
                                     <h2><?= e($orderNo) ?></h2>
 
                                     <p>
-                                        Tüketici:
+                                        <?= e($consumerLabel) ?>:
                                         <strong><?= e($consumerName) ?></strong>
                                     </p>
 
@@ -360,6 +466,10 @@ if (!function_exists('producer_orders_render_dynamic_area')) {
                             </div>
 
                             <div class="producer-order-status-area">
+                                <span class="producer-order-badge <?= $isNeighborhoodBasket ? 'badge-neighborhood' : 'badge-muted' ?>">
+                                    <?= e($orderTypeLabel) ?>
+                                </span>
+
                                 <span class="producer-order-badge <?= e(producer_orders_status_class($orderService, $orderStatus)) ?>">
                                     <?= e(producer_orders_status_label($orderService, $order, $orderStatus)) ?>
                                 </span>
@@ -377,6 +487,11 @@ if (!function_exists('producer_orders_render_dynamic_area')) {
                             </div>
 
                             <div>
+                                <span>Sipariş Türü</span>
+                                <strong><?= e($orderTypeLabel) ?></strong>
+                            </div>
+
+                            <div>
                                 <span>Ara Toplam</span>
                                 <strong><?= e(producer_orders_money((float) ($order['subtotal'] ?? 0))) ?></strong>
                             </div>
@@ -391,6 +506,61 @@ if (!function_exists('producer_orders_render_dynamic_area')) {
                                 <strong><?= e($trackingNo ?: '-') ?></strong>
                             </div>
                         </div>
+
+                        <?php if ($isNeighborhoodBasket && is_array($neighborhoodBasket)): ?>
+                            <?php
+                                $basketTarget = (float) ($neighborhoodBasket['target_quantity'] ?? 0);
+                                $basketCurrent = (float) ($neighborhoodBasket['current_quantity'] ?? 0);
+                                $basketUnit = producer_order_unit_label((string) ($neighborhoodBasket['unit_type'] ?? 'kg'));
+                                $basketDiscount = (float) ($neighborhoodBasket['discount_percent_snapshot'] ?? 0);
+                                $basketProgress = $basketTarget > 0 ? min(100, round(($basketCurrent / $basketTarget) * 100)) : 0;
+                            ?>
+
+                            <div class="neighborhood-order-box">
+                                <div class="neighborhood-order-title">
+                                    <span>🧺</span>
+
+                                    <div>
+                                        <strong>Mahalle Sepeti Toplu Siparişi</strong>
+                                        <p>
+                                            <?= e($neighborhoodBasket['basket_title'] ?? 'Mahalle Sepeti') ?>
+                                            <?php if (!empty($neighborhoodBasket['basket_creator_name'])): ?>
+                                                · Sepet sahibi: <?= e($neighborhoodBasket['basket_creator_name']) ?>
+                                            <?php endif; ?>
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div class="neighborhood-order-progress">
+                                    <div>
+                                        <span>Toplanan miktar</span>
+                                        <strong>
+                                            <?= e(number_format($basketCurrent, 2, ',', '.')) ?> /
+                                            <?= e(number_format($basketTarget, 2, ',', '.')) ?>
+                                            <?= e($basketUnit) ?>
+                                        </strong>
+                                    </div>
+
+                                    <div>
+                                        <span>İndirim</span>
+                                        <strong>%<?= e(number_format($basketDiscount, 2, ',', '.')) ?></strong>
+                                    </div>
+
+                                    <div>
+                                        <span>Sepet durumu</span>
+                                        <strong><?= e($neighborhoodBasket['basket_status'] ?? '-') ?></strong>
+                                    </div>
+                                </div>
+
+                                <div class="neighborhood-order-bar">
+                                    <span style="width: <?= e((string) $basketProgress) ?>%;"></span>
+                                </div>
+
+                                <a class="producer-orders-btn producer-orders-btn-light" href="<?= e(url('neighborhood-baskets.php?action=show&id=' . (int) $neighborhoodBasket['basket_id'])) ?>">
+                                    Mahalle Sepeti Detayını Gör
+                                </a>
+                            </div>
+                        <?php endif; ?>
 
                         <div class="producer-status-update-box">
                             <form
@@ -431,8 +601,8 @@ if (!function_exists('producer_orders_render_dynamic_area')) {
                                 <span>🧺</span>
 
                                 <div>
-                                    <h3>Ürünler</h3>
-                                    <p>Bu siparişte yer alan ürün kalemleri.</p>
+                                    <h3><?= $isNeighborhoodBasket ? 'Toplu alınan ürün' : 'Ürünler' ?></h3>
+                                    <p><?= $isNeighborhoodBasket ? 'Mahalle Sepeti üzerinden toplu siparişe dönüşen ürün kalemi.' : 'Bu siparişte yer alan ürün kalemleri.' ?></p>
                                 </div>
                             </div>
 
@@ -526,7 +696,7 @@ if (is_post()) {
     $status = trim((string) ($_POST['order_status'] ?? ''));
 
     $result = $orderService->updateStatus($producerId, $orderId, $status);
-    $orders = $orderService->getProducerOrders($producerId);
+    $orders = producer_orders_enrich_neighborhood_baskets($orderService->getProducerOrders($producerId));
 
     if ($isAjax) {
         producer_orders_json([
@@ -546,7 +716,7 @@ if (is_post()) {
     redirect('producer/orders.php');
 }
 
-$orders = $orderService->getProducerOrders($producerId);
+$orders = producer_orders_enrich_neighborhood_baskets($orderService->getProducerOrders($producerId));
 
 $pageTitle = 'Gelen Siparişler';
 $bodyClass = 'page-producer-orders';
@@ -577,8 +747,8 @@ require APP_PATH . '/Views/layouts/header.php';
                     <h1>Gelen Siparişler</h1>
 
                     <p>
-                        Tüketicilerden gelen siparişleri buradan görüntüleyebilir, ürün kalemlerini inceleyebilir
-                        ve sipariş durumlarını sayfa yenilenmeden güncelleyebilirsin.
+                        Tüketicilerden gelen normal siparişleri ve Mahalle Sepeti toplu siparişlerini buradan görüntüleyebilir,
+                        ürün kalemlerini inceleyebilir ve sipariş durumlarını sayfa yenilenmeden güncelleyebilirsin.
                     </p>
 
                     <div id="producer-orders-hero-stats-wrap">
@@ -592,13 +762,14 @@ require APP_PATH . '/Views/layouts/header.php';
                     <h2>Siparişleri düzenli takip et</h2>
 
                     <p>
-                        Hazırlık, kargo ve teslimat aşamalarını güncel tutarak tüketicinin süreci net görmesini sağla.
+                        Hazırlık, kargo ve teslimat aşamalarını güncel tutarak tüketicinin süreci net görmesini sağla. Mahalle Sepeti siparişleri özel etiketle gösterilir.
                     </p>
 
                     <div class="hero-mini-list">
                         <span>🧺 Ürün kalemleri</span>
                         <span>🚚 Kargo takibi</span>
                         <span>✅ Durum güncelleme</span>
+                        <span>🧺 Mahalle Sepeti</span>
                     </div>
                 </div>
             </div>
@@ -918,7 +1089,7 @@ require APP_PATH . '/Views/layouts/header.php';
 
     .producer-orders-summary-grid {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 16px;
         margin-bottom: 22px;
     }
@@ -963,7 +1134,7 @@ require APP_PATH . '/Views/layouts/header.php';
 
     .producer-orders-filter-row {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) 240px;
+        grid-template-columns: minmax(0, 1fr) 230px 230px;
         gap: 12px;
         align-items: center;
     }
@@ -1015,6 +1186,10 @@ require APP_PATH . '/Views/layouts/header.php';
         padding: 20px;
         border-left: 6px solid var(--orders-green-700);
         transition: transform .18s ease, box-shadow .18s ease, opacity .18s ease;
+    }
+
+    .producer-order-card.is-neighborhood-order {
+        border-left-color: #f2bf4d;
     }
 
     .producer-order-card:hover {
@@ -1106,6 +1281,11 @@ require APP_PATH . '/Views/layouts/header.php';
         color: #526052;
     }
 
+    .badge-neighborhood {
+        background: #fff5d6;
+        color: #7a5400;
+    }
+
     .producer-order-summary-grid {
         display: grid;
         grid-template-columns: repeat(4, 1fr);
@@ -1137,6 +1317,94 @@ require APP_PATH . '/Views/layouts/header.php';
     .producer-order-summary-grid strong {
         color: var(--orders-green-900);
         overflow-wrap: anywhere;
+    }
+
+    .neighborhood-order-box {
+        margin-bottom: 20px;
+        padding: 16px;
+        border-radius: 22px;
+        background: #fff8df;
+        border: 1px solid rgba(242, 191, 77, .35);
+    }
+
+    .neighborhood-order-title {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        margin-bottom: 14px;
+    }
+
+    .neighborhood-order-title > span {
+        width: 44px;
+        height: 44px;
+        display: grid;
+        place-items: center;
+        border-radius: 16px;
+        background: #ffffff;
+        flex: 0 0 auto;
+        font-size: 22px;
+    }
+
+    .neighborhood-order-title strong {
+        display: block;
+        color: #7a5400;
+        font-size: 18px;
+        margin-bottom: 4px;
+    }
+
+    .neighborhood-order-title p {
+        margin: 0;
+        color: #8a6200;
+        line-height: 1.5;
+    }
+
+    .neighborhood-order-progress {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 12px;
+    }
+
+    .neighborhood-order-progress div {
+        padding: 12px;
+        border-radius: 16px;
+        background: #ffffff;
+        border: 1px solid rgba(242, 191, 77, .24);
+    }
+
+    .neighborhood-order-progress span,
+    .neighborhood-order-progress strong {
+        display: block;
+    }
+
+    .neighborhood-order-progress span {
+        color: #8a6200;
+        font-size: 12px;
+        font-weight: 900;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        margin-bottom: 6px;
+    }
+
+    .neighborhood-order-progress strong {
+        color: #7a5400;
+        overflow-wrap: anywhere;
+    }
+
+    .neighborhood-order-bar {
+        width: 100%;
+        height: 11px;
+        border-radius: 999px;
+        background: rgba(242, 191, 77, .24);
+        overflow: hidden;
+        margin-bottom: 14px;
+    }
+
+    .neighborhood-order-bar span {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, #d59a24, #f2bf4d);
     }
 
     .producer-status-update-box {
@@ -1443,7 +1711,8 @@ require APP_PATH . '/Views/layouts/header.php';
         }
 
         .producer-order-summary-grid,
-        .shipment-grid {
+        .shipment-grid,
+        .neighborhood-order-progress {
             grid-template-columns: 1fr 1fr;
         }
 
@@ -1494,6 +1763,7 @@ require APP_PATH . '/Views/layouts/header.php';
         .producer-orders-summary-grid,
         .producer-order-summary-grid,
         .shipment-grid,
+        .neighborhood-order-progress,
         .producer-orders-filter-row {
             grid-template-columns: 1fr;
         }
@@ -1543,22 +1813,26 @@ require APP_PATH . '/Views/layouts/header.php';
         function applyOrderFilters() {
             const searchInput = document.getElementById('producer-order-search');
             const statusFilter = document.getElementById('producer-order-status-filter');
+            const typeFilter = document.getElementById('producer-order-type-filter');
             const cards = document.querySelectorAll('[data-order-card]');
             const noResult = document.getElementById('producer-orders-no-result');
 
             const searchValue = searchInput ? searchInput.value.trim().toLowerCase() : '';
             const statusValue = statusFilter ? statusFilter.value : '';
+            const typeValue = typeFilter ? typeFilter.value : '';
 
             let visibleCount = 0;
 
             cards.forEach(function (card) {
                 const cardText = (card.getAttribute('data-search') || '').toLowerCase();
                 const cardStatus = card.getAttribute('data-status') || '';
+                const cardType = card.getAttribute('data-type') || 'normal';
 
                 const matchesSearch = searchValue === '' || cardText.includes(searchValue);
                 const matchesStatus = statusValue === '' || cardStatus === statusValue;
+                const matchesType = typeValue === '' || cardType === typeValue;
 
-                if (matchesSearch && matchesStatus) {
+                if (matchesSearch && matchesStatus && matchesType) {
                     card.classList.remove('is-hidden');
                     visibleCount++;
                 } else {
@@ -1656,7 +1930,7 @@ require APP_PATH . '/Views/layouts/header.php';
         });
 
         document.addEventListener('change', function (event) {
-            if (event.target && event.target.id === 'producer-order-status-filter') {
+            if (event.target && (event.target.id === 'producer-order-status-filter' || event.target.id === 'producer-order-type-filter')) {
                 applyOrderFilters();
             }
         });

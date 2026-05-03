@@ -3,11 +3,20 @@
 $user = currentUser();
 
 $currentScript = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '');
+$normalizedScript = '/' . trim($currentScript, '/');
+$publicMarker = '/public/';
+$publicPosition = strpos($normalizedScript, $publicMarker);
 
-$isActive = function (string $path) use ($currentScript): string {
-    $needle = '/' . ltrim($path, '/');
+$currentPath = $publicPosition !== false
+    ? substr($normalizedScript, $publicPosition + strlen($publicMarker))
+    : ltrim($normalizedScript, '/');
 
-    return substr($currentScript, -strlen($needle)) === $needle ? ' active' : '';
+$currentPath = trim($currentPath, '/');
+
+$isActive = function (string $path) use ($currentPath): string {
+    $path = trim($path, '/');
+
+    return $currentPath === $path ? ' active' : '';
 };
 
 $unreadNotificationCount = 0;
@@ -223,6 +232,11 @@ if ($user && !empty($user['full_name'])) {
                     <a class="menu-link<?= $isActive('consumer/orders.php') ?>" href="<?= e(url('consumer/orders.php')) ?>">
                         <span>📦</span>
                         Siparişlerim
+                    </a>
+
+                    <a class="menu-link<?= $isActive('consumer/neighborhood-baskets.php') ?>" href="<?= e(url('consumer/neighborhood-baskets.php')) ?>">
+                        <span>🧺</span>
+                        Mahalle Sepetlerim
                     </a>
 
                     <a class="menu-link<?= $isActive('consumer/favorites.php') ?>" href="<?= e(url('consumer/favorites.php')) ?>">

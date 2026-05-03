@@ -35,6 +35,19 @@ if (!function_exists('producer_notification_data_array')) {
     }
 }
 
+
+if (!function_exists('producer_notification_is_neighborhood')) {
+    function producer_notification_is_neighborhood(array $notification): bool
+    {
+        $type = (string) ($notification['type'] ?? '');
+        $data = producer_notification_data_array($notification);
+
+        return str_contains($type, 'neighborhood_basket')
+            || !empty($data['basket_id'])
+            || (($data['order_type'] ?? '') === 'neighborhood_basket');
+    }
+}
+
 if (!function_exists('producer_notification_safe_target')) {
     function producer_notification_safe_target(string $target): string
     {
@@ -65,8 +78,24 @@ if (!function_exists('producer_notification_target_path')) {
         $data = producer_notification_data_array($notification);
         $type = (string) ($notification['type'] ?? '');
 
+        if (!empty($data['link'])) {
+            return producer_notification_safe_target((string) $data['link']);
+        }
+
         if (!empty($data['url'])) {
             return producer_notification_safe_target((string) $data['url']);
+        }
+
+        if (producer_notification_is_neighborhood($notification)) {
+            if (!empty($data['order_id'])) {
+                return 'producer/orders.php';
+            }
+
+            if (!empty($data['basket_id'])) {
+                return 'neighborhood-baskets.php?action=show&id=' . (int) $data['basket_id'];
+            }
+
+            return 'producer/orders.php';
         }
 
         if ($type === 'new_product_question' && !empty($data['question_id'])) {
@@ -90,8 +119,22 @@ if (!function_exists('producer_notification_target_path')) {
 }
 
 if (!function_exists('producer_notification_type_label')) {
-    function producer_notification_type_label(string $type): string
+    function producer_notification_type_label($notification): string
     {
+        $type = is_array($notification)
+            ? (string) ($notification['type'] ?? '')
+            : (string) $notification;
+
+        if (is_array($notification) && producer_notification_is_neighborhood($notification)) {
+            return match ($type) {
+                'neighborhood_basket_ready' => 'Sepet Hazır',
+                'neighborhood_basket_ordered' => 'Toplu Sipariş',
+                'neighborhood_basket_joined' => 'Mahalle Sepeti',
+                'neighborhood_basket_invite' => 'Mahalle Sepeti Daveti',
+                default => 'Mahalle Sepeti Siparişi',
+            };
+        }
+
         return match ($type) {
             'new_order' => 'Yeni Sipariş',
             'order_created' => 'Sipariş',
@@ -101,33 +144,86 @@ if (!function_exists('producer_notification_type_label')) {
             'product_question_answered' => 'Soru Cevabı',
             'restock_alert' => 'Stok Bildirimi',
             'favorite_product_updated' => 'Favori Ürün',
+            'neighborhood_basket_ready' => 'Sepet Hazır',
+            'neighborhood_basket_ordered' => 'Toplu Sipariş',
+            'neighborhood_basket_joined' => 'Mahalle Sepeti',
+            'neighborhood_basket_invite' => 'Mahalle Sepeti Daveti',
             default => 'Bildirim',
         };
     }
 }
 
 if (!function_exists('producer_notification_badge_class')) {
-    function producer_notification_badge_class(string $type): string
+    function producer_notification_badge_class($notification): string
     {
+        $type = is_array($notification)
+            ? (string) ($notification['type'] ?? '')
+            : (string) $notification;
+
+        if (is_array($notification) && producer_notification_is_neighborhood($notification)) {
+            return in_array($type, ['neighborhood_basket_ready'], true)
+                ? 'badge-warning'
+                : 'badge-neighborhood';
+        }
+
         return match ($type) {
             'new_order', 'order_created', 'new_review' => 'badge-success',
             'order_status_changed', 'new_product_question', 'product_question_answered' => 'badge-info',
-            'restock_alert' => 'badge-warning',
+            'restock_alert', 'neighborhood_basket_ready' => 'badge-warning',
+            'neighborhood_basket_ordered', 'neighborhood_basket_joined', 'neighborhood_basket_invite' => 'badge-neighborhood',
             default => 'badge-muted',
         };
     }
 }
 
 if (!function_exists('producer_notification_icon')) {
-    function producer_notification_icon(string $type): string
+    function producer_notification_icon($notification): string
     {
+        $type = is_array($notification)
+            ? (string) ($notification['type'] ?? '')
+            : (string) $notification;
+
+        if (is_array($notification) && producer_notification_is_neighborhood($notification)) {
+            return '🧺';
+        }
+
         return match ($type) {
             'new_order', 'order_created', 'order_status_changed' => '📦',
             'new_review' => '⭐',
             'new_product_question', 'product_question_answered' => '❔',
             'restock_alert' => '🌱',
             'favorite_product_updated' => '♥',
+            'neighborhood_basket_invite', 'neighborhood_basket_joined', 'neighborhood_basket_ready', 'neighborhood_basket_ordered' => '🧺',
             default => '🔔',
+        };
+    }
+}
+
+
+if (!function_exists('producer_notification_action_text')) {
+    function producer_notification_action_text(array $notification): string
+    {
+        $type = (string) ($notification['type'] ?? '');
+
+        if (producer_notification_is_neighborhood($notification)) {
+            if ($type === 'neighborhood_basket_ready') {
+                return 'Sepeti Gör';
+            }
+
+            if ($type === 'new_order' || $type === 'neighborhood_basket_ordered') {
+                return 'Mahalle Sepeti Siparişini Gör';
+            }
+
+            return 'Mahalle Sepetini Gör';
+        }
+
+        return match ($type) {
+            'new_order', 'order_created', 'order_status_changed' => 'Siparişe Git',
+            'new_review' => 'Yorumu Gör',
+            'new_product_question' => 'Soruyu Gör',
+            'product_question_answered' => 'Cevabı Gör',
+            'restock_alert', 'favorite_product_updated' => 'Ürünü Gör',
+            default => 'İlgili Kısma Git',
         };
     }
 }
@@ -158,6 +254,7 @@ if (!function_exists('producer_notification_stats')) {
             'orders' => 0,
             'questions' => 0,
             'reviews' => 0,
+            'neighborhood' => 0,
         ];
 
         foreach ($notifications as $notification) {
@@ -177,6 +274,10 @@ if (!function_exists('producer_notification_stats')) {
 
             if (str_contains($type, 'review')) {
                 $stats['reviews']++;
+            }
+
+            if (producer_notification_is_neighborhood($notification)) {
+                $stats['neighborhood']++;
             }
         }
 
@@ -199,6 +300,7 @@ if (!function_exists('producer_notification_render_hero_stats')) {
             <span>🔔 <?= e((string) $stats['total']) ?> bildirim</span>
             <span>🟢 <?= e((string) $unreadCount) ?> okunmamış</span>
             <span>📦 <?= e((string) $stats['orders']) ?> sipariş</span>
+            <span>🧺 <?= e((string) $stats['neighborhood']) ?> mahalle sepeti</span>
             <span>❔ <?= e((string) $stats['questions']) ?> soru</span>
         </div>
         <?php
@@ -224,7 +326,7 @@ if (!function_exists('producer_notification_render_dynamic_area')) {
                 <h2>Henüz bildirimin yok.</h2>
 
                 <p>
-                    Ürünlerine soru sorulduğunda, yorum geldiğinde veya yeni sipariş oluştuğunda
+                    Ürünlerine soru sorulduğunda, yorum geldiğinde, yeni sipariş veya Mahalle Sepeti toplu siparişi oluştuğunda
                     bildirimlerin burada görünecek.
                 </p>
 
@@ -246,7 +348,7 @@ if (!function_exists('producer_notification_render_dynamic_area')) {
                     <h2>Üretici bildirimlerin</h2>
 
                     <p>
-                        Yeni siparişleri, ürün sorularını, yorumları ve sistem mesajlarını buradan takip edebilirsin.
+                        Yeni siparişleri, Mahalle Sepeti toplu siparişlerini, ürün sorularını, yorumları ve sistem mesajlarını buradan takip edebilirsin.
                     </p>
                 </div>
 
@@ -303,6 +405,15 @@ if (!function_exists('producer_notification_render_dynamic_area')) {
                 </article>
 
                 <article class="producer-notification-stat-card glass-card">
+                    <span>🧺</span>
+
+                    <div>
+                        <strong><?= e((string) $stats['neighborhood']) ?></strong>
+                        <p>Mahalle Sepeti</p>
+                    </div>
+                </article>
+
+                <article class="producer-notification-stat-card glass-card">
                     <span>❔</span>
 
                     <div>
@@ -318,17 +429,20 @@ if (!function_exists('producer_notification_render_dynamic_area')) {
                         $isRead = !empty($notification['is_read']);
                         $type = (string) ($notification['type'] ?? '');
                         $targetPath = producer_notification_target_path($notification);
+                        $actionText = producer_notification_action_text($notification);
+                        $notificationData = producer_notification_data_array($notification);
+                        $isNeighborhoodNotification = producer_notification_is_neighborhood($notification);
                     ?>
 
-                    <article class="producer-notification-card glass-card <?= $isRead ? 'is-read' : 'is-unread' ?>">
+                    <article class="producer-notification-card glass-card <?= $isRead ? 'is-read' : 'is-unread' ?> <?= $isNeighborhoodNotification ? 'is-neighborhood' : '' ?>">
                         <div class="producer-notification-icon">
-                            <?= e(producer_notification_icon($type)) ?>
+                            <?= e(producer_notification_icon($notification)) ?>
                         </div>
 
                         <div class="producer-notification-content">
                             <div class="producer-notification-title-row">
-                                <span class="producer-notification-badge <?= e(producer_notification_badge_class($type)) ?>">
-                                    <?= e(producer_notification_type_label($type)) ?>
+                                <span class="producer-notification-badge <?= e(producer_notification_badge_class($notification)) ?>">
+                                    <?= e(producer_notification_type_label($notification)) ?>
                                 </span>
 
                                 <?php if (!$isRead): ?>
@@ -344,6 +458,20 @@ if (!function_exists('producer_notification_render_dynamic_area')) {
                                 <?= nl2br(e($notification['message'] ?? '')) ?>
                             </p>
 
+                            <?php if ($isNeighborhoodNotification): ?>
+                                <div class="producer-neighborhood-notification-mini">
+                                    <span>🧺 Mahalle Sepeti</span>
+
+                                    <?php if (!empty($notificationData['basket_id'])): ?>
+                                        <small>Sepet ID: <?= e((string) $notificationData['basket_id']) ?></small>
+                                    <?php endif; ?>
+
+                                    <?php if (!empty($notificationData['order_id'])): ?>
+                                        <small>Sipariş ID: <?= e((string) $notificationData['order_id']) ?></small>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endif; ?>
+
                             <span class="producer-notification-date">
                                 <?= e(producer_notification_date($notification['created_at'] ?? null)) ?>
                             </span>
@@ -358,7 +486,7 @@ if (!function_exists('producer_notification_render_dynamic_area')) {
                                 <input type="hidden" name="target" value="<?= e($targetPath) ?>">
 
                                 <button class="producer-notifications-btn producer-notifications-btn-primary full" type="submit">
-                                    İlgili Kısma Git
+                                    <?= e($actionText) ?>
                                 </button>
                             </form>
 
@@ -495,7 +623,7 @@ require APP_PATH . '/Views/layouts/header.php';
                     <h1>Üretici Bildirimleri</h1>
 
                     <p>
-                        Yeni siparişler, ürün yorumları, tüketici soruları ve sistem mesajlarını
+                        Yeni siparişler, Mahalle Sepeti toplu siparişleri, ürün yorumları, tüketici soruları ve sistem mesajlarını
                         tek ekrandan takip edebilirsin.
                     </p>
 
@@ -510,13 +638,14 @@ require APP_PATH . '/Views/layouts/header.php';
                     <h2>Gelişmeleri kaçırma</h2>
 
                     <p>
-                        Ürünlerinle ilgili tüm önemli hareketler burada toplanır ve hızlıca ilgili sayfaya gidebilirsin.
+                        Ürünlerinle ve Mahalle Sepeti toplu siparişlerinle ilgili önemli hareketler burada toplanır.
                     </p>
 
                     <div class="hero-mini-list">
                         <span>📦 Sipariş</span>
                         <span>❔ Ürün sorusu</span>
                         <span>⭐ Yorum</span>
+                        <span>🧺 Mahalle Sepeti</span>
                     </div>
                 </div>
             </div>
@@ -847,7 +976,7 @@ require APP_PATH . '/Views/layouts/header.php';
 
     .producer-notifications-summary-grid {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 16px;
         margin-bottom: 22px;
     }
@@ -912,6 +1041,30 @@ require APP_PATH . '/Views/layouts/header.php';
         opacity: .82;
     }
 
+    .producer-notification-card.is-neighborhood {
+        border-left-color: #f2bf4d;
+    }
+
+    .producer-neighborhood-notification-mini {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 0 0 10px;
+    }
+
+    .producer-neighborhood-notification-mini span,
+    .producer-neighborhood-notification-mini small {
+        display: inline-flex;
+        align-items: center;
+        padding: 7px 10px;
+        border-radius: 999px;
+        background: #f6fbf4;
+        border: 1px solid rgba(47, 125, 61, .14);
+        color: #245c2f;
+        font-size: 12px;
+        font-weight: 900;
+    }
+
     .producer-notification-title-row {
         display: flex;
         gap: 8px;
@@ -945,6 +1098,12 @@ require APP_PATH . '/Views/layouts/header.php';
     .badge-info {
         background: #e8f1ff;
         color: #1f4e8c;
+    }
+
+    .badge-neighborhood {
+        background: #eef8ec;
+        color: #245c2f;
+        border: 1px solid rgba(47, 125, 61, .16);
     }
 
     .badge-muted {
