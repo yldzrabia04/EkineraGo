@@ -202,6 +202,11 @@ if ($user && !empty($user['full_name'])) {
                 <span>🗺️</span>
                 Harita
             </a>
+
+            <a class="menu-link<?= $isActive('neighborhood-baskets.php') ?>" href="<?= e(url('neighborhood-baskets.php')) ?>">
+                <span>🧺</span>
+                Mahalle Sepeti
+            </a>
         </div>
 
         <?php if ($user): ?>
@@ -260,6 +265,11 @@ if ($user && !empty($user['full_name'])) {
                                 <?= e((string) $pendingQuestionCount) ?>
                             </span>
                         <?php endif; ?>
+                    </a>
+
+                    <a class="menu-link<?= $isActive('producer/neighborhood-offers.php') ?>" href="<?= e(url('producer/neighborhood-offers.php')) ?>">
+                        <span>🏷️</span>
+                        Toplu Alım İlanları
                     </a>
                 </div>
             <?php endif; ?>
