@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const cityList = document.querySelector('[data-city-list]');
     const citySearch = document.querySelector('[data-city-search]');
     const resetButton = document.querySelector('[data-map-reset]');
+    const producerApiUrl = mapElement.dataset.producerApi || '';
 
     const geoJsonUrls = [
         'assets/tr-cities-utf8.json',
@@ -189,6 +190,15 @@ document.addEventListener('DOMContentLoaded', function () {
             .replaceAll('û', 'u');
     }
 
+    function escapeHtml(value) {
+        return String(value || '')
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#039;');
+    }
+
     function getCityName(feature) {
         const p = feature.properties || {};
 
@@ -211,6 +221,16 @@ document.addEventListener('DOMContentLoaded', function () {
         return plateByCityName[normalizeText(cityName)] || '';
     }
 
+    function producerInitial(name) {
+        const cleanName = String(name || '').trim();
+
+        if (!cleanName) {
+            return 'Ü';
+        }
+
+        return cleanName.charAt(0).toLocaleUpperCase('tr-TR');
+    }
+
     function applyStyle(layer, style) {
         if (!layer || typeof layer.setStyle !== 'function') {
             return;
@@ -229,6 +249,167 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    function setProducerLoading(cityName) {
+        if (producerCount) {
+            producerCount.textContent = 'Yükleniyor';
+        }
+
+        if (producerList) {
+            producerList.innerHTML = `
+                <div class="producer-loading-state">
+                    <div class="producer-loading-spinner"></div>
+                    <strong>${escapeHtml(cityName)} üreticileri yükleniyor</strong>
+                    <p>Seçilen ildeki üreticiler veritabanından alınıyor.</p>
+                </div>
+            `;
+        }
+    }
+
+    function renderProducerError(cityName, message) {
+        if (producerCount) {
+            producerCount.textContent = 'Hata';
+        }
+
+        if (producerList) {
+            producerList.innerHTML = `
+                <div class="producer-empty-state">
+                    <div class="producer-empty-icon">⚠️</div>
+                    <strong>${escapeHtml(cityName)} üreticileri alınamadı</strong>
+                    <p>${escapeHtml(message || 'API isteği başarısız oldu.')}</p>
+                </div>
+            `;
+        }
+    }
+
+    function renderProducerCards(cityName, producers) {
+        if (!producerCount || !producerList) {
+            return;
+        }
+
+        producerCount.textContent = `${producers.length} üretici`;
+
+        if (!producers.length) {
+            producerList.innerHTML = `
+                <div class="producer-empty-state">
+                    <div class="producer-empty-icon">🌾</div>
+                    <strong>${escapeHtml(cityName)} için üretici bulunamadı</strong>
+                    <p>
+                        Bu ilde kayıtlı aktif üretici yok. Üretici kullanıcılarının il bilgisinin dolu olduğundan emin ol.
+                    </p>
+                </div>
+            `;
+
+            return;
+        }
+
+        producerList.innerHTML = producers.map(function (producer) {
+            const storeName = escapeHtml(producer.store_name || producer.full_name || 'Üretici');
+            const fullName = escapeHtml(producer.full_name || '');
+            const address = escapeHtml(producer.address_text || 'Adres bilgisi eklenmemiş');
+            const phone = escapeHtml(producer.phone || 'Telefon bilgisi yok');
+            const rating = Number(producer.average_rating || 0).toFixed(2);
+            const ratingCount = Number(producer.rating_count || 0);
+            const productCount = Number(producer.active_product_count || 0);
+            const profileUrl = escapeHtml(producer.profile_url || '#');
+            const productsUrl = escapeHtml(producer.products_url || '#');
+            const whatsappUrl = producer.whatsapp_url ? escapeHtml(producer.whatsapp_url) : '';
+            const telHref = producer.phone
+                ? `tel:${escapeHtml(String(producer.phone).replaceAll(' ', ''))}`
+                : '#';
+
+            const logoHtml = producer.logo_url
+                ? `<img src="${escapeHtml(producer.logo_url)}" alt="${storeName}">`
+                : `<span>${escapeHtml(producerInitial(storeName))}</span>`;
+
+            const whatsappButton = whatsappUrl
+                ? `<a class="producer-action producer-action-whatsapp" href="${whatsappUrl}" target="_blank" rel="noopener">WhatsApp</a>`
+                : `<span class="producer-action producer-action-disabled">WhatsApp yok</span>`;
+
+            return `
+                <article class="producer-map-card">
+                    <button class="producer-map-card-toggle" type="button" aria-expanded="false">
+                        <span class="producer-map-logo">${logoHtml}</span>
+
+                        <span class="producer-map-main">
+                            <strong>${storeName}</strong>
+                            <small>${fullName}</small>
+                        </span>
+
+                        <span class="producer-map-chevron">⌄</span>
+                    </button>
+
+                    <div class="producer-map-details">
+                        <div class="producer-map-meta">
+                            <span>⭐ ${rating} / 5 (${ratingCount})</span>
+                            <span>🥬 ${productCount} aktif ürün</span>
+                        </div>
+
+                        <p class="producer-map-address">${address}</p>
+
+                        <div class="producer-map-contact">
+                            <span>Telefon</span>
+                            <strong>${phone}</strong>
+                        </div>
+
+                        <div class="producer-map-actions">
+                            <a class="producer-action" href="${profileUrl}">Profili Gör</a>
+                            <a class="producer-action" href="${productsUrl}">Ürünleri</a>
+                            ${whatsappButton}
+                            <a class="producer-action" href="${telHref}">Ara</a>
+                        </div>
+                    </div>
+                </article>
+            `;
+        }).join('');
+
+        producerList.querySelectorAll('.producer-map-card-toggle').forEach(function (button) {
+            button.addEventListener('click', function () {
+                const card = button.closest('.producer-map-card');
+                const isOpen = card.classList.toggle('is-open');
+
+                button.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            });
+        });
+    }
+
+    async function loadProducersByProvince(cityName) {
+        const plate = getPlate(cityName);
+
+        if (!producerApiUrl) {
+            renderProducerError(cityName, 'API yolu bulunamadı. map.php içindeki data-producer-api değerini kontrol et.');
+            return;
+        }
+
+        if (!plate) {
+            renderProducerError(cityName, 'Seçilen il için plaka bilgisi bulunamadı.');
+            return;
+        }
+
+        setProducerLoading(cityName);
+
+        try {
+            const separator = producerApiUrl.includes('?') ? '&' : '?';
+            const requestUrl = `${producerApiUrl}${separator}plate_code=${encodeURIComponent(plate)}`;
+
+            const response = await fetch(requestUrl, {
+                headers: {
+                    Accept: 'application/json'
+                }
+            });
+
+            const data = await response.json();
+
+            if (!response.ok || !data.success) {
+                throw new Error(data.message || 'Üretici listesi alınamadı.');
+            }
+
+            renderProducerCards(cityName, data.producers || []);
+        } catch (error) {
+            console.error(error);
+            renderProducerError(cityName, error.message);
+        }
+    }
+
     function updateSelectedPanel(cityName) {
         const plate = getPlate(cityName);
 
@@ -242,19 +423,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 : `${cityName} seçildi.`;
         }
 
-        if (producerCount) {
-            producerCount.textContent = 'API bekliyor';
-        }
-
-        if (producerList) {
-            producerList.innerHTML = `
-                <div class="producer-empty-icon">🌱</div>
-                <strong>${cityName} seçildi</strong>
-                <p>
-                    ${plate ? plate + ' plakalı' : 'Seçilen'} il için üretici listesi sonraki adımda veritabanından çekilecek.
-                </p>
-            `;
-        }
+        loadProducersByProvince(cityName);
     }
 
     function selectCity(layer, cityName) {
@@ -517,7 +686,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     <span class="map-error">
                         Harita yüklenemedi.<br>
                         tr-cities-utf8.json dosyasını public/assets içine koyabilir veya internet bağlantısını kontrol edebilirsin.<br>
-                        Hata: ${error.message}
+                        Hata: ${escapeHtml(error.message)}
                     </span>
                 `;
             }
