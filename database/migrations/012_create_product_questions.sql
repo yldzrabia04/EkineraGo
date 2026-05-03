@@ -1,3 +1,9 @@
+CREATE DATABASE IF NOT EXISTS ekinerago
+CHARACTER SET utf8mb4
+COLLATE utf8mb4_unicode_ci;
+
+USE ekinerago;
+
 CREATE TABLE IF NOT EXISTS product_questions (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
 
@@ -30,4 +36,4 @@ CREATE TABLE IF NOT EXISTS product_questions (
     INDEX idx_product_questions_consumer (consumer_id),
     INDEX idx_product_questions_producer_status (producer_id, status),
     INDEX idx_product_questions_created_at (created_at)
-);
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
