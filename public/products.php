@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 
 require_once __DIR__ . '/../app/bootstrap.php';
 
@@ -128,6 +128,24 @@ if (!function_exists('product_public_current_return_url')) {
     }
 }
 
+
+if (!function_exists('product_public_page_url')) {
+    function product_public_page_url(int $page): string
+    {
+        $query = $_GET;
+
+        if ($page <= 1) {
+            unset($query['page']);
+        } else {
+            $query['page'] = $page;
+        }
+
+        $queryString = http_build_query($query);
+
+        return url('products.php' . ($queryString !== '' ? '?' . $queryString : ''));
+    }
+}
+
 if (!function_exists('product_public_favorite_button')) {
     function product_public_favorite_button(array $product): string
     {
@@ -176,6 +194,22 @@ if (!function_exists('product_public_favorite_button')) {
     }
 }
 
+$productsPerPage = 10;
+$totalProducts = count($products);
+$currentPage = max(1, (int) ($_GET['page'] ?? 1));
+$totalPages = max(1, (int) ceil($totalProducts / $productsPerPage));
+
+if ($currentPage > $totalPages) {
+    $currentPage = $totalPages;
+}
+
+$productOffset = ($currentPage - 1) * $productsPerPage;
+$paginatedProducts = array_slice($products, $productOffset, $productsPerPage);
+$shownStart = $totalProducts > 0 ? $productOffset + 1 : 0;
+$shownEnd = min($productOffset + $productsPerPage, $totalProducts);
+$paginationWindowStart = max(1, $currentPage - 2);
+$paginationWindowEnd = min($totalPages, $currentPage + 2);
+
 ?>
 
 <main class="products-page">
@@ -211,7 +245,7 @@ if (!function_exists('product_public_favorite_button')) {
             <div class="products-hero-visual">
                 <div class="hero-visual-card">
                     <span class="hero-visual-icon">🥬</span>
-                    <strong><?= count($products) ?></strong>
+                    <strong><?= e((string) $totalProducts) ?></strong>
                     <small>Aktif ürün listeleniyor</small>
                 </div>
 
@@ -401,7 +435,12 @@ if (!function_exists('product_public_favorite_button')) {
             <div class="results-header">
                 <div>
                     <span class="results-label">Ürün Listesi</span>
-                    <h2><?= count($products) ?> ürün bulundu</h2>
+                    <h2><?= e((string) $totalProducts) ?> ürün bulundu</h2>
+                    <?php if ($totalProducts > 0): ?>
+                        <p class="results-count-detail">
+                            <?= e((string) $shownStart) ?>-<?= e((string) $shownEnd) ?> arası gösteriliyor.
+                        </p>
+                    <?php endif; ?>
                 </div>
 
                 <a class="results-all-link" href="<?= e(url('producers.php')) ?>">
@@ -427,7 +466,7 @@ if (!function_exists('product_public_favorite_button')) {
             <?php else: ?>
 
                 <div class="products-grid">
-                    <?php foreach ($products as $product): ?>
+                    <?php foreach ($paginatedProducts as $product): ?>
                         <?php
                             $productId = (int) ($product['id'] ?? 0);
                             $producerId = (int) ($product['producer_id'] ?? $product['user_id'] ?? 0);
@@ -536,6 +575,62 @@ if (!function_exists('product_public_favorite_button')) {
                         </article>
                     <?php endforeach; ?>
                 </div>
+
+                <?php if ($totalPages > 1): ?>
+                    <nav class="products-pagination" aria-label="Ürün sayfaları">
+                        <?php if ($currentPage > 1): ?>
+                            <a class="pagination-btn" href="<?= e(product_public_page_url($currentPage - 1)) ?>">
+                                ← Önceki
+                            </a>
+                        <?php else: ?>
+                            <span class="pagination-btn is-disabled" aria-disabled="true">
+                                ← Önceki
+                            </span>
+                        <?php endif; ?>
+
+                        <div class="pagination-pages">
+                            <?php if ($paginationWindowStart > 1): ?>
+                                <a class="pagination-page" href="<?= e(product_public_page_url(1)) ?>">1</a>
+
+                                <?php if ($paginationWindowStart > 2): ?>
+                                    <span class="pagination-ellipsis">...</span>
+                                <?php endif; ?>
+                            <?php endif; ?>
+
+                            <?php for ($pageNumber = $paginationWindowStart; $pageNumber <= $paginationWindowEnd; $pageNumber++): ?>
+                                <?php if ($pageNumber === $currentPage): ?>
+                                    <span class="pagination-page is-active" aria-current="page">
+                                        <?= e((string) $pageNumber) ?>
+                                    </span>
+                                <?php else: ?>
+                                    <a class="pagination-page" href="<?= e(product_public_page_url($pageNumber)) ?>">
+                                        <?= e((string) $pageNumber) ?>
+                                    </a>
+                                <?php endif; ?>
+                            <?php endfor; ?>
+
+                            <?php if ($paginationWindowEnd < $totalPages): ?>
+                                <?php if ($paginationWindowEnd < $totalPages - 1): ?>
+                                    <span class="pagination-ellipsis">...</span>
+                                <?php endif; ?>
+
+                                <a class="pagination-page" href="<?= e(product_public_page_url($totalPages)) ?>">
+                                    <?= e((string) $totalPages) ?>
+                                </a>
+                            <?php endif; ?>
+                        </div>
+
+                        <?php if ($currentPage < $totalPages): ?>
+                            <a class="pagination-btn" href="<?= e(product_public_page_url($currentPage + 1)) ?>">
+                                Sonraki →
+                            </a>
+                        <?php else: ?>
+                            <span class="pagination-btn is-disabled" aria-disabled="true">
+                                Sonraki →
+                            </span>
+                        <?php endif; ?>
+                    </nav>
+                <?php endif; ?>
 
             <?php endif; ?>
         </section>
@@ -721,12 +816,28 @@ if (!function_exists('product_public_favorite_button')) {
     .products-filter-panel {
         position: sticky;
         top: 96px;
+        max-height: calc(100vh - 120px);
+        overflow-y: auto;
         border-radius: 30px;
         padding: 22px;
         background: rgba(255, 255, 255, 0.92);
         border: 1px solid #dfeedd;
         box-shadow: 0 18px 50px rgba(36, 92, 47, 0.10);
         backdrop-filter: blur(14px);
+
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+    }
+
+    .products-filter-panel::-webkit-scrollbar {
+        width: 0;
+        height: 0;
+        display: none;
+    }
+
+    .products-filter-panel::-webkit-scrollbar-thumb {
+        border-radius: 999px;
+        background: #b7dcb1;
     }
 
     .filter-title {
@@ -887,6 +998,13 @@ if (!function_exists('product_public_favorite_button')) {
         color: #245c2f;
         font-size: 26px;
         letter-spacing: -0.04em;
+    }
+
+    .results-count-detail {
+        margin: 6px 0 0;
+        color: #6d7b6d;
+        font-size: 13px;
+        font-weight: 800;
     }
 
     .results-all-link {
@@ -1183,6 +1301,66 @@ if (!function_exists('product_public_favorite_button')) {
         background: #d8ebdb;
     }
 
+    .products-pagination {
+        margin-top: 24px;
+        padding: 16px;
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.9);
+        border: 1px solid #dfeedd;
+        box-shadow: 0 14px 36px rgba(36, 92, 47, 0.08);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+    }
+
+    .pagination-pages {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .pagination-btn,
+    .pagination-page {
+        min-height: 40px;
+        padding: 0 14px;
+        border-radius: 999px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: #e8f3e9;
+        color: #2f7d3d;
+        text-decoration: none;
+        font-weight: 900;
+        transition: 0.2s ease;
+    }
+
+    .pagination-page {
+        min-width: 40px;
+        padding: 0 12px;
+    }
+
+    .pagination-btn:hover,
+    .pagination-page:hover,
+    .pagination-page.is-active {
+        background: #2f7d3d;
+        color: #ffffff;
+        transform: translateY(-1px);
+    }
+
+    .pagination-btn.is-disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+        pointer-events: none;
+    }
+
+    .pagination-ellipsis {
+        color: #6d7b6d;
+        font-weight: 900;
+    }
+
     .empty-state {
         min-height: 360px;
         border-radius: 30px;
@@ -1286,6 +1464,8 @@ if (!function_exists('product_public_favorite_button')) {
 
         .products-filter-panel {
             position: static;
+            max-height: none;
+            overflow: visible;
         }
 
         .filter-grid {
@@ -1343,6 +1523,14 @@ if (!function_exists('product_public_favorite_button')) {
         }
 
         .results-all-link {
+            width: 100%;
+        }
+
+        .products-pagination {
+            flex-direction: column;
+        }
+
+        .pagination-btn {
             width: 100%;
         }
     }
