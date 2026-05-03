@@ -2,7 +2,7 @@
 
 require_once __DIR__ . '/../app/bootstrap.php';
 
-// GuestMiddleware::handle();
+GuestMiddleware::handle();
 
 $controller = new AuthController();
 

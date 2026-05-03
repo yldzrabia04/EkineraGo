@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 
 $user = currentUser();
 
@@ -196,6 +196,11 @@ if ($user && !empty($user['full_name'])) {
             <a class="menu-link<?= $isActive('producers.php') ?>" href="<?= e(url('producers.php')) ?>">
                 <span>🚜</span>
                 Üreticiler
+            </a>
+
+            <a class="menu-link<?= $isActive('map.php') ?>" href="<?= e(url('map.php')) ?>">
+                <span>🗺️</span>
+                Harita
             </a>
         </div>
 
