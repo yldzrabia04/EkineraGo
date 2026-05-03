@@ -231,7 +231,7 @@ class Notification
                 'basket_id' => $basketId,
                 'order_id' => $orderId,
                 'amount' => $amount,
-                'link' => 'consumer/orders.php',
+                'link' => 'neighborhood-baskets.php?action=show&id=' . $basketId,
             ],
         ]);
     }
@@ -253,7 +253,7 @@ class Notification
                 'order_id' => $orderId,
                 'order_type' => 'neighborhood_basket',
                 'total_amount' => $totalAmount,
-                'link' => 'producer/orders.php',
+                'link' => 'neighborhood-baskets.php?action=show&id=' . $basketId,
             ],
         ]);
     }

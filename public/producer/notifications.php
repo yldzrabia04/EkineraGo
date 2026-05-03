@@ -78,24 +78,20 @@ if (!function_exists('producer_notification_target_path')) {
         $data = producer_notification_data_array($notification);
         $type = (string) ($notification['type'] ?? '');
 
+        if (producer_notification_is_neighborhood($notification)) {
+            if (!empty($data['basket_id'])) {
+                return 'neighborhood-baskets.php?action=show&id=' . (int) $data['basket_id'];
+            }
+
+            return 'producer/orders.php';
+        }
+
         if (!empty($data['link'])) {
             return producer_notification_safe_target((string) $data['link']);
         }
 
         if (!empty($data['url'])) {
             return producer_notification_safe_target((string) $data['url']);
-        }
-
-        if (producer_notification_is_neighborhood($notification)) {
-            if (!empty($data['order_id'])) {
-                return 'producer/orders.php';
-            }
-
-            if (!empty($data['basket_id'])) {
-                return 'neighborhood-baskets.php?action=show&id=' . (int) $data['basket_id'];
-            }
-
-            return 'producer/orders.php';
         }
 
         if ($type === 'new_product_question' && !empty($data['question_id'])) {

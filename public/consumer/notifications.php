@@ -81,16 +81,22 @@ if (!function_exists('consumer_notification_target')) {
             }
         }
 
+        if (!empty($data['basket_id']) || !empty($data['neighborhood_basket_id']) || str_contains($type, 'neighborhood')) {
+            if (!empty($data['basket_id'])) {
+                return 'neighborhood-baskets.php?action=show&id=' . (int) $data['basket_id'];
+            }
+            if (!empty($data['neighborhood_basket_id'])) {
+                return 'neighborhood-baskets.php?action=show&id=' . (int) $data['neighborhood_basket_id'];
+            }
+            return 'consumer/neighborhood-baskets.php';
+        }
+
         if (!empty($data['order_id']) || !empty($data['order_no']) || str_contains($type, 'order')) {
             return 'consumer/orders.php';
         }
 
         if (!empty($data['producer_id'])) {
             return 'producer-detail.php?id=' . (int) $data['producer_id'];
-        }
-
-        if (!empty($data['basket_id']) || !empty($data['neighborhood_basket_id']) || str_contains($type, 'neighborhood')) {
-            return 'consumer/orders.php';
         }
 
         if (str_contains($type, 'wallet') || str_contains($type, 'payment') || str_contains($type, 'balance')) {

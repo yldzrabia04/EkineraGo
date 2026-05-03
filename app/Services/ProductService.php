@@ -28,6 +28,7 @@ class ProductService
             'sort' => $filters['sort'] ?? 'newest',
             'in_stock' => !empty($filters['in_stock']),
             'preorder' => !empty($filters['preorder']),
+            'producer_id' => !empty($filters['producer_id']) ? (int) $filters['producer_id'] : null,
 
             // Ürün kartında kalbin dolu/boş görünmesi için.
             'favorite_user_id' => (isLoggedIn() && isConsumer()) ? (int) currentUserId() : 0,

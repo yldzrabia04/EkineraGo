@@ -211,6 +211,11 @@ class Product
             $params['district_id'] = (int) $filters['district_id'];
         }
 
+        if (!empty($filters['producer_id'])) {
+            $where[] = "p.producer_id = :producer_id";
+            $params['producer_id'] = (int) $filters['producer_id'];
+        }
+
         if (isset($filters['min_price']) && $filters['min_price'] !== '') {
             $where[] = "p.price >= :min_price";
             $params['min_price'] = (float) $filters['min_price'];

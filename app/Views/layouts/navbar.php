@@ -126,9 +126,11 @@ if ($user && !empty($user['full_name'])) {
                     </a>
                 <?php endif; ?>
 
-                <a class="top-action top-action-icon<?= $isActive($walletUrl) ?>" href="<?= e(url($walletUrl)) ?>" title="Bakiye">
-                    <span class="action-icon">👛</span>
-                </a>
+                <?php if (($user['role'] ?? '') !== ROLE_PRODUCER): ?>
+                    <a class="top-action top-action-icon<?= $isActive($walletUrl) ?>" href="<?= e(url($walletUrl)) ?>" title="Bakiye">
+                        <span class="action-icon">👛</span>
+                    </a>
+                <?php endif; ?>
 
                 <a class="top-action top-action-icon<?= $isActive($notificationUrl) ?>" href="<?= e(url($notificationUrl)) ?>" title="Bildirimler">
                     <span class="action-icon">🔔</span>

@@ -244,7 +244,7 @@ if (!function_exists('nb_notify_basket_ordered')) {
                     'basket_id' => $basketId,
                     'order_id' => $orderId,
                     'amount' => $amount,
-                    'link' => 'consumer/orders.php',
+                    'link' => 'neighborhood-baskets.php?action=show&id=' . $basketId,
                 ],
             ]);
         } catch (Throwable $e) {
@@ -273,7 +273,7 @@ if (!function_exists('nb_notify_basket_producer_order')) {
                     'order_id' => $orderId,
                     'order_type' => 'neighborhood_basket',
                     'total_amount' => $totalAmount,
-                    'link' => 'producer/orders.php',
+                    'link' => 'neighborhood-baskets.php?action=show&id=' . $basketId,
                 ],
             ]);
         } catch (Throwable $e) {
